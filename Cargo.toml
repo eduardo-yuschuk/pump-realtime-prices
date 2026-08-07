@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "common",
+    "programs/pump/pumpfun",
+    "programs/pump/pumpswap",
+    "util/block_loader",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = ""

@@ -1,0 +1,5 @@
+# Cargo build artifacts
+/target/
+
+# Rust backup files created by rustfmt
+**/*.rs.bk
