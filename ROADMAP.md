@@ -2,11 +2,11 @@
 
 ## Development
 
-- [ ] Define the public traversable JSON data representation for `util/block_loader` without requiring a complete block struct mapping.
-- [ ] Implement a public `util/block_loader` function that loads an uncompressed block JSON file from disk.
-- [ ] Implement a public `util/block_loader` function that loads a gzip-compressed block JSON file from disk.
-- [ ] Implement a public `util/block_loader` function that loads a block from an in-memory JSON string.
-- [ ] Add tests for all public `util/block_loader` loading functions and their error handling.
+- [x] Define the public traversable JSON data representation for `util/block_loader` without requiring a complete block struct mapping.
+- [x] Implement a public `util/block_loader` function that loads an uncompressed block JSON file from disk.
+- [x] Implement a public `util/block_loader` function that loads a gzip-compressed block JSON file from disk.
+- [x] Implement a public `util/block_loader` function that loads a block from an in-memory JSON string.
+- [x] Add tests for all public `util/block_loader` loading functions and their error handling.
 
 ## Documentation
 

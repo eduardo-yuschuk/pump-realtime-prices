@@ -22,6 +22,9 @@ The crate must provide public functions for each supported source:
 
 All functions must return the same traversable data representation so that consuming crates can process block data independently of its source.
 
+The implemented API uses `serde_json::Value` and exposes `load_json_file`,
+`load_gzip_json_file`, and `load_json_str`.
+
 ## Consumers
 
 Other workspace crates use `block_loader` as their common data-loading boundary. Source-specific decompression and JSON parsing belong in this crate; consuming crates should receive already loaded block data and focus on indexing logic.
