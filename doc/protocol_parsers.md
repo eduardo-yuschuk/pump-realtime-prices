@@ -18,4 +18,4 @@ If official sources are unavailable, ambiguous, or inconsistent with observed on
 
 ## Pump.fun Baseline
 
-The Pump.fun parser uses the official [`pump-fun/pump-public-docs`](https://github.com/pump-fun/pump-public-docs) repository, including `idl/pump.json`, as its primary specification. Its supported layouts must also be checked against real successful Pump.fun instructions before they are considered complete.
+The Pump.fun parser uses commit [`9c82f61cb711b044a17f770ab8ce9f9bdf78f333`](https://github.com/pump-fun/pump-public-docs/commit/9c82f61cb711b044a17f770ab8ce9f9bdf78f333) of the official `pump-fun/pump-public-docs` repository, including `idl/pump.json`, as its primary specification. Its supported layouts are checked against the successful mainnet instructions identified by the fixtures under `programs/pump/pumpfun/tests/fixtures/`.
