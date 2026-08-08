@@ -7,6 +7,11 @@
 - [x] Implement a public `util/block_loader` function that loads a gzip-compressed block JSON file from disk.
 - [x] Implement a public `util/block_loader` function that loads a block from an in-memory JSON string.
 - [x] Add tests for all public `util/block_loader` loading functions and their error handling.
+- [x] Define a public interface for all the implementations of instruction parser (parse_instruction).
+- [ ] Implement the Pump.fun parser.
+- [ ] Add tests for all public Pump.fun parsing functions and their error handling.
+- [ ] Implement the PumpSwap parser.
+- [ ] Add tests for all public PumpSwap parsing functions and their error handling.
 
 ## Documentation
 
@@ -18,6 +23,7 @@
 
 - [x] Add Rust build artifact exclusions.
 - [x] Add the `commit-push` workflow skill.
+- [x] Add project-scoped Solana MCP server configuration.
 
 ## Utilities
 
