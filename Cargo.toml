@@ -11,3 +11,11 @@ resolver = "2"
 edition = "2021"
 license = "MIT"
 repository = ""
+
+[workspace.dependencies]
+bs58 = "0.5.1"
+common = { path = "common" }
+dotenvy = "0.15.7"
+pumpfun = { path = "programs/pump/pumpfun" }
+pumpswap = { path = "programs/pump/pumpswap" }
+serde_json = "1.0"
