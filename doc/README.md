@@ -15,6 +15,7 @@ For example, slot `123456789` is stored in `sample_data/123456789.json.gz`.
 ## Crate Documentation
 
 - [`block_loader`](block_loader.md): shared block-loading crate contract and public API requirements.
+- [Parser architecture](parser.md): parser pipeline, protocol crate boundaries, configuration, ordering, output, and real-time input contract.
 
 ## Implementation Policies
 

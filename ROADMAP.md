@@ -41,7 +41,7 @@
 - [x] Ensure all repository documentation is written in English.
 - [x] Document the complete-block compressed JSON storage convention.
 - [x] Document the public `block_loader` crate contract.
-- [ ] Document the block parsing architecture, `PARSERS` configuration, parser registry lifecycle, validator instruction ordering, ordered event/error output contract, and the boundary through which a future real-time block stream will invoke `BlockParser`.
+- [x] Document the block parsing architecture, `PARSERS` configuration, parser registry lifecycle, validator instruction ordering, ordered event/error output contract, and the boundary through which a future real-time block stream will invoke `BlockParser`.
 - [x] Add an English `.env.example` documenting the strict comma-separated `PARSERS=pumpfun,pumpswap` configuration.
 
 ## Repository Maintenance
