@@ -8,9 +8,9 @@
 - [x] Implement a public `util/block_loader` function that loads a block from an in-memory JSON string.
 - [x] Add tests for all public `util/block_loader` loading functions and their error handling.
 - [x] Define shared token discovery and token swap outputs and a public interface for all instruction parsers (`parse_instruction`).
-- [ ] Implement the Pump.fun parser.
+- [ ] Implement the Pump.fun parser. It must return the applicable shared `ParsedEvent` variant, or `Ok(None)` when the instruction produces no modeled event.
 - [ ] Add tests for all public Pump.fun parsing functions and their error handling.
-- [ ] Implement the PumpSwap parser.
+- [ ] Implement the PumpSwap parser. It must return the applicable shared `ParsedEvent` variant, or `Ok(None)` when the instruction produces no modeled event.
 - [ ] Add tests for all public PumpSwap parsing functions and their error handling.
 
 ## Documentation

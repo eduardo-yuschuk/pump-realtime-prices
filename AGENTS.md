@@ -26,3 +26,9 @@ the repository should be in a language other than English.
   to an existing item or propose adding it to `ROADMAP.md` first.
 - When a task is completed, update its status in `ROADMAP.md` in the same change.
 - If `ROADMAP.md` does not exist yet, creating it is the first task.
+
+## Protocol parser sources
+
+Before implementing or modifying a protocol parser, follow
+`doc/protocol_parsers.md`. Parser layouts must be based on versioned official
+sources and validated against real successful on-chain data.
