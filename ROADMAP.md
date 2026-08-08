@@ -24,11 +24,11 @@
 - [x] Add `TransactionParser` tests covering legacy and versioned transactions, loaded address resolution, base58 decoding, nested CPI ordering by `stackHeight`, failed transaction filtering, malformed transaction data, and partial event/error collection.
 - [x] Add `BlockParser` tests against real block fixtures covering transaction order, instruction execution order, multiple protocol events, filtered empty transactions, and continued parsing after instruction-scoped failures.
 - [ ] Implement `tools/get_json_transaction.sh` to accept a transaction signature, fetch its full JSON transaction from Solana RPC, and store the formatted response as `sample_data/<signature>.json.gz`.
-- [ ] Create a `util/transaction_loader` workspace library crate with the same public traversable `serde_json::Value` boundary used by `block_loader`.
-- [ ] Implement a public `transaction_loader` function that loads a gzip-compressed transaction JSON file from disk.
-- [ ] Implement a public `transaction_loader` function that loads an uncompressed transaction JSON file from disk.
-- [ ] Implement a public `transaction_loader` function that loads a transaction from an in-memory JSON string.
-- [ ] Add tests for all public `transaction_loader` functions and their error handling using real and malformed transaction fixtures.
+- [x] Create a `util/transaction_loader` workspace library crate with the same public traversable `serde_json::Value` boundary used by `block_loader`.
+- [x] Implement a public `transaction_loader` function that loads a gzip-compressed transaction JSON file from disk.
+- [x] Implement a public `transaction_loader` function that loads an uncompressed transaction JSON file from disk.
+- [x] Implement a public `transaction_loader` function that loads a transaction from an in-memory JSON string.
+- [x] Add tests for all public `transaction_loader` functions and their error handling using real and malformed transaction fixtures.
 - [ ] Add parser configuration resolution that accepts an optional comma-separated protocol-list override. A provided override must take precedence over `PARSERS`; when absent, configuration must continue loading from `.env`.
 - [ ] Add tests for protocol-list override precedence, strict validation, and `.env` fallback.
 - [ ] Create a visual inspection binary crate in the workspace for blocks and transactions. Its initial transaction mode must accept a transaction signature and protocol name, load `sample_data/<signature>.json.gz` through `transaction_loader`, parse it with only the requested protocol enabled, and print the detected ordered events and parse failures.

@@ -5,6 +5,7 @@ members = [
     "programs/pump/pumpfun",
     "programs/pump/pumpswap",
     "util/block_loader",
+    "util/transaction_loader",
 ]
 resolver = "2"
 
