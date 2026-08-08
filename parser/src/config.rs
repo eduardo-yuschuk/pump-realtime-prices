@@ -64,6 +64,16 @@ impl ParserConfig {
         Self::new(parsers)
     }
 
+    /// Resolves parser configuration from a strict comma-separated override or the environment.
+    ///
+    /// A provided override is parsed without loading `.env` or reading `PARSERS`.
+    pub fn resolve(protocol_list_override: Option<&str>) -> Result<Self, ConfigError> {
+        match protocol_list_override {
+            Some(value) => Self::parse(value),
+            None => Self::from_env(),
+        }
+    }
+
     pub fn from_env() -> Result<Self, ConfigError> {
         match dotenvy::dotenv() {
             Ok(_) => {}
@@ -161,6 +171,58 @@ mod tests {
             })
         );
         assert_eq!(ParserConfig::new(vec![]), Err(ConfigError::EmptyParsers));
+    }
+
+    #[test]
+    fn protocol_list_override_takes_precedence_over_parsers_environment_variable() {
+        let _lock = ENVIRONMENT.lock().unwrap();
+        let _guard = EnvironmentGuard::capture();
+        env::set_var("PARSERS", "pumpswap");
+
+        let config = ParserConfig::resolve(Some("pumpfun")).unwrap();
+
+        assert_eq!(config.parsers(), &[ParserName::PumpFun]);
+    }
+
+    #[test]
+    fn validates_protocol_list_overrides_strictly() {
+        let _lock = ENVIRONMENT.lock().unwrap();
+        let _guard = EnvironmentGuard::capture();
+        env::set_var("PARSERS", "pumpfun");
+
+        assert_eq!(
+            ParserConfig::resolve(Some("  ")),
+            Err(ConfigError::EmptyParsers)
+        );
+        assert_eq!(
+            ParserConfig::resolve(Some("pumpfun,")),
+            Err(ConfigError::EmptyParserName { index: 1 })
+        );
+        assert_eq!(
+            ParserConfig::resolve(Some("pumpswap")),
+            Err(ConfigError::UnknownParser {
+                name: "pumpswap".to_owned()
+            })
+        );
+        assert_eq!(
+            ParserConfig::resolve(Some("pumpfun,pumpfun")),
+            Err(ConfigError::DuplicateParser {
+                name: "pumpfun".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn falls_back_to_dotenv_without_a_protocol_list_override() {
+        let _lock = ENVIRONMENT.lock().unwrap();
+        let mut guard = EnvironmentGuard::capture();
+        guard.use_temporary_directory();
+        guard.write_dotenv();
+        env::remove_var("PARSERS");
+
+        let config = ParserConfig::resolve(None).unwrap();
+
+        assert_eq!(config.parsers(), &[ParserName::PumpFun]);
     }
 
     #[test]

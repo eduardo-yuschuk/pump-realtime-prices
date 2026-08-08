@@ -3,3 +3,6 @@
 
 # Rust backup files created by rustfmt
 **/*.rs.bk
+
+# Local environment configuration
+/.env

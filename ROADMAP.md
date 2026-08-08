@@ -29,8 +29,8 @@
 - [x] Implement a public `transaction_loader` function that loads an uncompressed transaction JSON file from disk.
 - [x] Implement a public `transaction_loader` function that loads a transaction from an in-memory JSON string.
 - [x] Add tests for all public `transaction_loader` functions and their error handling using real and malformed transaction fixtures.
-- [ ] Add parser configuration resolution that accepts an optional comma-separated protocol-list override. A provided override must take precedence over `PARSERS`; when absent, configuration must continue loading from `.env`.
-- [ ] Add tests for protocol-list override precedence, strict validation, and `.env` fallback.
+- [x] Add parser configuration resolution that accepts an optional comma-separated protocol-list override. A provided override must take precedence over `PARSERS`; when absent, configuration must continue loading from `.env`.
+- [x] Add tests for protocol-list override precedence, strict validation, and `.env` fallback.
 - [ ] Create a visual inspection binary crate in the workspace for blocks and transactions. Its initial transaction mode must accept a transaction signature and protocol name, load `sample_data/<signature>.json.gz` through `transaction_loader`, parse it with only the requested protocol enabled, and print the detected ordered events and parse failures.
 - [ ] Add tests for the visual transaction inspector covering argument validation, missing fixtures, protocol selection, and rendered parsed events.
 - [ ] Implement the PumpSwap parser. It must return the applicable shared `ParsedEvent` variant, or `Ok(None)` when the instruction produces no modeled event.
@@ -42,7 +42,7 @@
 - [x] Document the complete-block compressed JSON storage convention.
 - [x] Document the public `block_loader` crate contract.
 - [ ] Document the block parsing architecture, `PARSERS` configuration, parser registry lifecycle, validator instruction ordering, ordered event/error output contract, and the boundary through which a future real-time block stream will invoke `BlockParser`.
-- [ ] Add an English `.env.example` documenting the strict comma-separated `PARSERS=pumpfun,pumpswap` configuration.
+- [x] Add an English `.env.example` documenting the strict comma-separated `PARSERS=pumpfun,pumpswap` configuration.
 
 ## Repository Maintenance
 
