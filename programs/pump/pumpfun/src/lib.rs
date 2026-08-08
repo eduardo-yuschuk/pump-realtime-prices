@@ -34,13 +34,15 @@ const EVENT_HEADER_LEN: usize = EVENT_IX_TAG.len() + CREATE_EVENT_DISCRIMINATOR.
 pub struct PumpFunParser;
 
 impl InstructionParser for PumpFunParser {
-    const PROGRAM_ID: &'static str = PROGRAM_ID;
+    fn program_id(&self) -> &'static str {
+        PROGRAM_ID
+    }
 
     fn parse_instruction(
         &self,
         instruction: InstructionContext<'_>,
     ) -> ParseResult<Option<ParsedEvent>> {
-        instruction.ensure_program_id(Self::PROGRAM_ID)?;
+        instruction.ensure_program_id(self.program_id())?;
 
         if !instruction.data().starts_with(&EVENT_IX_TAG) {
             return Ok(None);

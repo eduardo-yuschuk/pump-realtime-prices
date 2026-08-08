@@ -124,13 +124,13 @@ pub enum ParsedEvent {
 
 /// Common interface implemented by each protocol instruction parser.
 ///
-/// Implementations should validate [`Self::PROGRAM_ID`] before reading accounts
+/// Implementations should validate [`Self::program_id`] before reading accounts
 /// or instruction data. They return `Ok(None)` for instructions that do not
 /// produce a token discovery or token swap, and an error when a relevant event
 /// is recognized but malformed.
-pub trait InstructionParser {
+pub trait InstructionParser: Send + Sync {
     /// Program address accepted by this parser.
-    const PROGRAM_ID: &'static str;
+    fn program_id(&self) -> &'static str;
 
     /// Parses one normalized instruction into a storage-facing event, if any.
     fn parse_instruction(
@@ -203,13 +203,15 @@ mod tests {
     struct TestParser;
 
     impl InstructionParser for TestParser {
-        const PROGRAM_ID: &'static str = TEST_PROGRAM_ID;
+        fn program_id(&self) -> &'static str {
+            TEST_PROGRAM_ID
+        }
 
         fn parse_instruction(
             &self,
             instruction: InstructionContext<'_>,
         ) -> ParseResult<Option<ParsedEvent>> {
-            instruction.ensure_program_id(Self::PROGRAM_ID)?;
+            instruction.ensure_program_id(self.program_id())?;
 
             match instruction.data().first() {
                 Some(0) => Ok(Some(ParsedEvent::TokenDiscovery(TokenDiscovery {

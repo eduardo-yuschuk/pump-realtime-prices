@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "common",
+    "parser",
     "programs/pump/pumpfun",
     "programs/pump/pumpswap",
     "util/block_loader",
