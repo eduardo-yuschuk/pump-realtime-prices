@@ -75,24 +75,68 @@ impl<'a> InstructionContext<'a> {
     }
 }
 
+/// A token discovered by a protocol parser.
+///
+/// Addresses are represented as base58 strings and metadata values are kept as
+/// published by the protocol.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TokenDiscovery {
+    /// Mint address of the new token.
+    pub mint: String,
+    /// Address attributed as the token creator by the protocol.
+    pub creator: String,
+    /// Token display name.
+    pub name: String,
+    /// Token ticker symbol.
+    pub symbol: String,
+    /// URI of the token's off-chain metadata.
+    pub uri: String,
+}
+
+/// A swap between two tokens discovered by a protocol parser.
+///
+/// Amounts are raw integer quantities in each mint's base units. Consumers are
+/// responsible for applying the corresponding mint decimals for display.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TokenSwap {
+    /// Address whose assets were exchanged.
+    pub user: String,
+    /// Pool or market address through which the swap was executed.
+    pub pool: String,
+    /// Mint address of the token supplied by the user.
+    pub input_mint: String,
+    /// Amount of the input token supplied, in base units.
+    pub input_amount: u64,
+    /// Mint address of the token received by the user.
+    pub output_mint: String,
+    /// Amount of the output token received, in base units.
+    pub output_amount: u64,
+}
+
+/// Storage-facing event produced by parsing one protocol instruction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ParsedEvent {
+    /// A newly discovered token.
+    TokenDiscovery(TokenDiscovery),
+    /// An executed token swap.
+    TokenSwap(TokenSwap),
+}
+
 /// Common interface implemented by each protocol instruction parser.
 ///
 /// Implementations should validate [`Self::PROGRAM_ID`] before reading accounts
-/// or instruction data. The associated output keeps protocol-specific
-/// instruction variants strongly typed while allowing callers to use one
-/// parsing contract.
+/// or instruction data. They return `Ok(None)` for instructions that do not
+/// produce a token discovery or token swap, and an error when a relevant event
+/// is recognized but malformed.
 pub trait InstructionParser {
     /// Program address accepted by this parser.
     const PROGRAM_ID: &'static str;
 
-    /// Protocol-specific parsed instruction type.
-    type ParsedInstruction;
-
-    /// Parses one normalized instruction.
+    /// Parses one normalized instruction into a storage-facing event, if any.
     fn parse_instruction(
         &self,
         instruction: InstructionContext<'_>,
-    ) -> ParseResult<Self::ParsedInstruction>;
+    ) -> ParseResult<Option<ParsedEvent>>;
 }
 
 /// Errors produced while interpreting normalized instruction data.
@@ -114,8 +158,6 @@ pub enum ParseError {
         expected_at_least: usize,
         actual: usize,
     },
-    /// The instruction discriminator is not supported by the parser.
-    UnknownDiscriminator(Vec<u8>),
     /// The instruction payload cannot be interpreted according to the protocol.
     InvalidInstructionData(String),
 }
@@ -140,12 +182,6 @@ impl fmt::Display for ParseError {
                 formatter,
                 "expected at least {expected_at_least} instruction data bytes, found {actual}"
             ),
-            Self::UnknownDiscriminator(discriminator) => {
-                write!(
-                    formatter,
-                    "unknown instruction discriminator {discriminator:02x?}"
-                )
-            }
             Self::InvalidInstructionData(reason) => {
                 write!(formatter, "invalid instruction data: {reason}")
             }
@@ -164,28 +200,43 @@ mod tests {
 
     const TEST_PROGRAM_ID: &str = "Test111111111111111111111111111111111111";
 
-    #[derive(Debug, PartialEq, Eq)]
-    struct ParsedInstruction {
-        amount: u64,
-    }
-
     struct TestParser;
 
     impl InstructionParser for TestParser {
         const PROGRAM_ID: &'static str = TEST_PROGRAM_ID;
 
-        type ParsedInstruction = ParsedInstruction;
-
         fn parse_instruction(
             &self,
             instruction: InstructionContext<'_>,
-        ) -> ParseResult<Self::ParsedInstruction> {
+        ) -> ParseResult<Option<ParsedEvent>> {
             instruction.ensure_program_id(Self::PROGRAM_ID)?;
-            instruction.account(1)?;
-            instruction.ensure_data_len(8)?;
 
-            let amount = u64::from_le_bytes(instruction.data()[..8].try_into().unwrap());
-            Ok(ParsedInstruction { amount })
+            match instruction.data().first() {
+                Some(0) => Ok(Some(ParsedEvent::TokenDiscovery(TokenDiscovery {
+                    creator: instruction.account(0)?.to_owned(),
+                    mint: instruction.account(1)?.to_owned(),
+                    name: "Test Token".to_owned(),
+                    symbol: "TEST".to_owned(),
+                    uri: "https://example.com/token.json".to_owned(),
+                }))),
+                Some(1) => {
+                    instruction.ensure_data_len(17)?;
+                    let input_amount =
+                        u64::from_le_bytes(instruction.data()[1..9].try_into().unwrap());
+                    let output_amount =
+                        u64::from_le_bytes(instruction.data()[9..17].try_into().unwrap());
+
+                    Ok(Some(ParsedEvent::TokenSwap(TokenSwap {
+                        user: instruction.account(0)?.to_owned(),
+                        pool: instruction.account(1)?.to_owned(),
+                        input_mint: instruction.account(2)?.to_owned(),
+                        input_amount,
+                        output_mint: instruction.account(3)?.to_owned(),
+                        output_amount,
+                    })))
+                }
+                _ => Ok(None),
+            }
         }
     }
 
@@ -202,15 +253,49 @@ mod tests {
     }
 
     #[test]
-    fn parser_implementations_share_the_public_contract() {
-        let accounts = ["payer", "mint"];
-        let data = 42_u64.to_le_bytes();
+    fn parser_implementations_return_token_discoveries() {
+        let accounts = ["creator", "mint"];
+        let data = [0];
         let instruction = InstructionContext::new(TEST_PROGRAM_ID, &accounts, &data);
 
         assert_eq!(
             TestParser.parse_instruction(instruction).unwrap(),
-            ParsedInstruction { amount: 42 }
+            Some(ParsedEvent::TokenDiscovery(TokenDiscovery {
+                mint: "mint".to_owned(),
+                creator: "creator".to_owned(),
+                name: "Test Token".to_owned(),
+                symbol: "TEST".to_owned(),
+                uri: "https://example.com/token.json".to_owned(),
+            }))
         );
+    }
+
+    #[test]
+    fn parser_implementations_return_token_swaps() {
+        let accounts = ["user", "pool", "input-mint", "output-mint"];
+        let mut data = vec![1];
+        data.extend_from_slice(&42_u64.to_le_bytes());
+        data.extend_from_slice(&84_u64.to_le_bytes());
+        let instruction = InstructionContext::new(TEST_PROGRAM_ID, &accounts, &data);
+
+        assert_eq!(
+            TestParser.parse_instruction(instruction).unwrap(),
+            Some(ParsedEvent::TokenSwap(TokenSwap {
+                user: "user".to_owned(),
+                pool: "pool".to_owned(),
+                input_mint: "input-mint".to_owned(),
+                input_amount: 42,
+                output_mint: "output-mint".to_owned(),
+                output_amount: 84,
+            }))
+        );
+    }
+
+    #[test]
+    fn parser_implementations_return_none_for_irrelevant_instructions() {
+        let instruction = InstructionContext::new(TEST_PROGRAM_ID, &[], &[2]);
+
+        assert_eq!(TestParser.parse_instruction(instruction).unwrap(), None);
     }
 
     #[test]
@@ -229,7 +314,7 @@ mod tests {
     #[test]
     fn reports_missing_accounts_before_reading_data() {
         let accounts = ["payer"];
-        let instruction = InstructionContext::new(TEST_PROGRAM_ID, &accounts, &[]);
+        let instruction = InstructionContext::new(TEST_PROGRAM_ID, &accounts, &[0]);
 
         assert_eq!(
             TestParser.parse_instruction(instruction),
@@ -242,13 +327,13 @@ mod tests {
 
     #[test]
     fn reports_truncated_instruction_data() {
-        let accounts = ["payer", "mint"];
+        let accounts = ["user", "pool", "input-mint", "output-mint"];
         let instruction = InstructionContext::new(TEST_PROGRAM_ID, &accounts, &[1, 2, 3]);
 
         assert_eq!(
             TestParser.parse_instruction(instruction),
             Err(ParseError::DataTooShort {
-                expected_at_least: 8,
+                expected_at_least: 17,
                 actual: 3,
             })
         );

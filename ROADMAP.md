@@ -7,7 +7,7 @@
 - [x] Implement a public `util/block_loader` function that loads a gzip-compressed block JSON file from disk.
 - [x] Implement a public `util/block_loader` function that loads a block from an in-memory JSON string.
 - [x] Add tests for all public `util/block_loader` loading functions and their error handling.
-- [x] Define a public interface for all the implementations of instruction parser (parse_instruction).
+- [x] Define shared token discovery and token swap outputs and a public interface for all instruction parsers (`parse_instruction`).
 - [ ] Implement the Pump.fun parser.
 - [ ] Add tests for all public Pump.fun parsing functions and their error handling.
 - [ ] Implement the PumpSwap parser.
