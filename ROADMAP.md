@@ -31,8 +31,8 @@
 - [x] Add tests for all public `transaction_loader` functions and their error handling using real and malformed transaction fixtures.
 - [x] Add parser configuration resolution that accepts an optional comma-separated protocol-list override. A provided override must take precedence over `PARSERS`; when absent, configuration must continue loading from `.env`.
 - [x] Add tests for protocol-list override precedence, strict validation, and `.env` fallback.
-- [ ] Create a visual inspection binary crate in the workspace for blocks and transactions. Its initial transaction mode must accept a transaction signature and protocol name, load `sample_data/<signature>.json.gz` through `transaction_loader`, parse it with only the requested protocol enabled, and print the detected ordered events and parse failures.
-- [ ] Add tests for the visual transaction inspector covering argument validation, missing fixtures, protocol selection, and rendered parsed events.
+- [x] Create a visual inspection binary crate in the workspace for blocks and transactions. Its initial transaction mode must accept a transaction signature and protocol name, load `sample_data/<signature>.json.gz` through `transaction_loader`, parse it with only the requested protocol enabled, and print the detected ordered events and parse failures.
+- [x] Add tests for the visual transaction inspector covering argument validation, missing fixtures, protocol selection, and rendered parsed events.
 - [ ] Implement the PumpSwap parser. It must return the applicable shared `ParsedEvent` variant, or `Ok(None)` when the instruction produces no modeled event.
 - [ ] Add tests for all public PumpSwap parsing functions and their error handling.
 

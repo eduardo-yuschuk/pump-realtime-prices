@@ -4,6 +4,7 @@ members = [
     "parser",
     "programs/pump/pumpfun",
     "programs/pump/pumpswap",
+    "tools/visual_inspector",
     "util/block_loader",
     "util/transaction_loader",
 ]
