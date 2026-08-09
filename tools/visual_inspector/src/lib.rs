@@ -278,14 +278,14 @@ mod tests {
     #[test]
     fn validates_the_selected_protocol_before_loading_the_fixture() {
         let error = run(
-            &arguments(&["transaction", SIGNATURE, "pumpswap"]),
+            &arguments(&["transaction", SIGNATURE, "unknown"]),
             workspace_root(),
         )
         .unwrap_err();
 
         assert!(matches!(
             error,
-            InspectorError::Config(ConfigError::UnknownParser { name }) if name == "pumpswap"
+            InspectorError::Config(ConfigError::UnknownParser { name }) if name == "unknown"
         ));
     }
 

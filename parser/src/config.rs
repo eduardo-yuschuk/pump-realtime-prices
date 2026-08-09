@@ -5,12 +5,14 @@ use crate::ConfigError;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParserName {
     PumpFun,
+    PumpSwap,
 }
 
 impl ParserName {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::PumpFun => "pumpfun",
+            Self::PumpSwap => "pumpswap",
         }
     }
 }
@@ -52,6 +54,7 @@ impl ParserConfig {
 
             let parser = match name {
                 "pumpfun" => ParserName::PumpFun,
+                "pumpswap" => ParserName::PumpSwap,
                 _ => {
                     return Err(ConfigError::UnknownParser {
                         name: name.to_owned(),
@@ -150,8 +153,10 @@ mod tests {
     #[test]
     fn parses_supported_names_and_rejects_invalid_configuration() {
         assert_eq!(
-            ParserConfig::parse(" pumpfun ").unwrap().parsers(),
-            &[ParserName::PumpFun]
+            ParserConfig::parse(" pumpfun, pumpswap ")
+                .unwrap()
+                .parsers(),
+            &[ParserName::PumpFun, ParserName::PumpSwap]
         );
         assert_eq!(ParserConfig::parse("  "), Err(ConfigError::EmptyParsers));
         assert_eq!(
@@ -159,9 +164,9 @@ mod tests {
             Err(ConfigError::EmptyParserName { index: 1 })
         );
         assert_eq!(
-            ParserConfig::parse("pumpswap"),
+            ParserConfig::parse("unknown"),
             Err(ConfigError::UnknownParser {
-                name: "pumpswap".to_owned()
+                name: "unknown".to_owned()
             })
         );
         assert_eq!(
@@ -177,7 +182,7 @@ mod tests {
     fn protocol_list_override_takes_precedence_over_parsers_environment_variable() {
         let _lock = ENVIRONMENT.lock().unwrap();
         let _guard = EnvironmentGuard::capture();
-        env::set_var("PARSERS", "pumpswap");
+        env::set_var("PARSERS", "unknown");
 
         let config = ParserConfig::resolve(Some("pumpfun")).unwrap();
 
@@ -199,10 +204,14 @@ mod tests {
             Err(ConfigError::EmptyParserName { index: 1 })
         );
         assert_eq!(
-            ParserConfig::resolve(Some("pumpswap")),
+            ParserConfig::resolve(Some("unknown")),
             Err(ConfigError::UnknownParser {
-                name: "pumpswap".to_owned()
+                name: "unknown".to_owned()
             })
+        );
+        assert_eq!(
+            ParserConfig::resolve(Some("pumpswap")).unwrap().parsers(),
+            &[ParserName::PumpSwap]
         );
         assert_eq!(
             ParserConfig::resolve(Some("pumpfun,pumpfun")),

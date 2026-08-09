@@ -42,7 +42,7 @@ The crates under `programs/` are off-chain parser integrations for deployed Sola
 
 `common/src/lib.rs` owns the interface shared by orchestration and protocol crates:
 
-- `InstructionContext` is a borrowed view containing a resolved program ID, account addresses in instruction order, and decoded instruction data.
+- `InstructionContext` is a borrowed view containing a resolved program ID, account addresses in instruction order, decoded instruction data, and the immediate calling instruction when the current instruction is a CPI and that relationship can be reconstructed.
 - `InstructionParser` is the object-safe protocol parser interface.
 - `ParseError` and `ParseResult` describe protocol-level decoding failures.
 - `ParsedEvent`, `TokenDiscovery`, and `TokenSwap` are the storage-facing event model.
@@ -72,7 +72,7 @@ Protocol crates do not resolve transaction account indexes, decode base58, trave
 
 Each protocol crate owns the program-specific details required to implement `InstructionParser`, including program IDs, discriminators, account positions, binary layouts, and event semantics. Implementations must follow the [protocol parser source policy](protocol_parsers.md), including versioned official sources and validation against successful on-chain data.
 
-`programs/pump/pumpfun` is currently the only protocol crate connected to the built-in registry. `programs/pump/pumpswap` is a workspace member, but its parser is not implemented and it is not yet a `parser` dependency, a valid `PARSERS` name, or a registry factory.
+`programs/pump/pumpfun` and `programs/pump/pumpswap` are connected to the built-in registry. Both parsers consume authoritative Anchor event self-CPIs rather than treating outer instruction limits as executed results. PumpSwap event CPIs are correlated with their immediate parent invocation because the event contains executed amounts while the parent accounts identify the base and quote mints.
 
 ### `parser`
 
@@ -97,7 +97,7 @@ The modules in `parser/src` divide orchestration responsibilities as follows:
 - An unknown parser name.
 - A duplicate parser name.
 
-The only currently supported name is `pumpfun`.
+The currently supported names are `pumpfun` and `pumpswap`.
 
 There are three configuration paths:
 
@@ -155,7 +155,7 @@ The transaction parser preserves the order exposed by validator block data:
 
 The `index` on an inner-instruction group associates that group with its outer instruction. Duplicate groups and groups referencing an outer index that does not exist are structural errors.
 
-`stackHeight` is retained as output metadata but is not used to sort instructions. The parser trusts the validator-provided inner-instruction order instead of trying to reconstruct CPI execution from stack height.
+`stackHeight` is retained as output metadata but is not used to sort instructions. The parser trusts the validator-provided inner-instruction order and uses stack height only to associate a CPI with its immediate calling instruction. This parent context allows event parsers such as PumpSwap to combine authoritative event amounts with mints carried by the parent swap instruction.
 
 `execution_ordinal` starts at zero for each transaction and increments for every visited outer or inner instruction, including instructions that are later filtered because their program is unconfigured or their parser returns no event. Visible output ordinals may therefore contain gaps.
 

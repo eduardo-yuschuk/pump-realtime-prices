@@ -6,3 +6,8 @@ license.workspace = true
 
 [dependencies]
 common = { path = "../../../common" }
+solana-pubkey = "4.3.0"
+
+[dev-dependencies]
+bs58 = "0.5.1"
+serde_json = "1.0"

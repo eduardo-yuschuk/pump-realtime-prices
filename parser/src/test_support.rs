@@ -31,6 +31,21 @@ impl InstructionParser for TestParser {
                 symbol: "TEST".to_owned(),
                 uri: "https://example.com/token.json".to_owned(),
             }))),
+            Some(4) => Ok(Some(ParsedEvent::TokenDiscovery(TokenDiscovery {
+                mint: instruction
+                    .parent_instruction()
+                    .ok_or_else(|| {
+                        ParseError::InvalidInstructionData(
+                            "test instruction has no immediate parent".to_owned(),
+                        )
+                    })?
+                    .account(0)?
+                    .to_owned(),
+                creator: "creator".to_owned(),
+                name: "Test Token".to_owned(),
+                symbol: "TEST".to_owned(),
+                uri: "https://example.com/token.json".to_owned(),
+            }))),
             _ => Ok(None),
         }
     }

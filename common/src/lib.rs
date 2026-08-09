@@ -9,6 +9,12 @@ use std::{error::Error, fmt};
 /// decode the instruction data into bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InstructionContext<'a> {
+    instruction: InstructionView<'a>,
+    parent_instruction: Option<InstructionView<'a>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct InstructionView<'a> {
     program_id: &'a str,
     accounts: &'a [&'a str],
     data: &'a [u8],
@@ -18,58 +24,79 @@ impl<'a> InstructionContext<'a> {
     /// Creates an instruction context from already normalized instruction data.
     pub const fn new(program_id: &'a str, accounts: &'a [&'a str], data: &'a [u8]) -> Self {
         Self {
-            program_id,
-            accounts,
-            data,
+            instruction: InstructionView {
+                program_id,
+                accounts,
+                data,
+            },
+            parent_instruction: None,
+        }
+    }
+
+    /// Associates this instruction with the invocation that called it.
+    pub const fn with_parent_instruction(mut self, parent: Self) -> Self {
+        self.parent_instruction = Some(parent.instruction);
+        self
+    }
+
+    /// Returns the immediate calling instruction for a CPI, when known.
+    pub const fn parent_instruction(&self) -> Option<Self> {
+        match self.parent_instruction {
+            Some(instruction) => Some(Self {
+                instruction,
+                parent_instruction: None,
+            }),
+            None => None,
         }
     }
 
     /// Returns the program address that owns the instruction.
     pub const fn program_id(&self) -> &'a str {
-        self.program_id
+        self.instruction.program_id
     }
 
     /// Returns instruction account addresses in their original order.
     pub const fn accounts(&self) -> &'a [&'a str] {
-        self.accounts
+        self.instruction.accounts
     }
 
     /// Returns the decoded instruction data.
     pub const fn data(&self) -> &'a [u8] {
-        self.data
+        self.instruction.data
     }
 
     /// Returns the account at `index`, or a structured error if it is absent.
     pub fn account(&self, index: usize) -> ParseResult<&'a str> {
-        self.accounts
+        self.instruction
+            .accounts
             .get(index)
             .copied()
             .ok_or(ParseError::MissingAccounts {
                 expected_at_least: index.saturating_add(1),
-                actual: self.accounts.len(),
+                actual: self.instruction.accounts.len(),
             })
     }
 
     /// Verifies that this instruction belongs to `expected`.
     pub fn ensure_program_id(&self, expected: &'static str) -> ParseResult<()> {
-        if self.program_id == expected {
+        if self.instruction.program_id == expected {
             Ok(())
         } else {
             Err(ParseError::ProgramMismatch {
                 expected,
-                actual: self.program_id.to_owned(),
+                actual: self.instruction.program_id.to_owned(),
             })
         }
     }
 
     /// Verifies that the instruction contains at least `expected_at_least` data bytes.
     pub fn ensure_data_len(&self, expected_at_least: usize) -> ParseResult<()> {
-        if self.data.len() >= expected_at_least {
+        if self.instruction.data.len() >= expected_at_least {
             Ok(())
         } else {
             Err(ParseError::DataTooShort {
                 expected_at_least,
-                actual: self.data.len(),
+                actual: self.instruction.data.len(),
             })
         }
     }
@@ -252,6 +279,21 @@ mod tests {
         assert_eq!(instruction.accounts(), accounts);
         assert_eq!(instruction.account(1).unwrap(), "mint");
         assert_eq!(instruction.data(), data);
+    }
+
+    #[test]
+    fn exposes_an_immediate_parent_instruction() {
+        let parent_accounts = ["pool", "user"];
+        let parent_data = [1, 2, 3];
+        let parent = InstructionContext::new(TEST_PROGRAM_ID, &parent_accounts, &parent_data);
+        let instruction =
+            InstructionContext::new(TEST_PROGRAM_ID, &[], &[4]).with_parent_instruction(parent);
+
+        let parent = instruction.parent_instruction().unwrap();
+        assert_eq!(parent.program_id(), TEST_PROGRAM_ID);
+        assert_eq!(parent.accounts(), parent_accounts);
+        assert_eq!(parent.data(), parent_data);
+        assert_eq!(parent.parent_instruction(), None);
     }
 
     #[test]

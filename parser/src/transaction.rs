@@ -74,12 +74,14 @@ impl TransactionParser {
         let mut execution_ordinal = 0;
         let mut instruction_events = Vec::new();
         for (outer_instruction_index, instruction) in outer_instructions.iter().enumerate() {
+            let mut invocation_stack = Vec::new();
             if let Some(result) = self.parse_instruction(
                 instruction,
                 &account_keys,
                 outer_instruction_index,
                 None,
                 execution_ordinal,
+                &mut invocation_stack,
             ) {
                 instruction_events.push(result);
             }
@@ -95,6 +97,7 @@ impl TransactionParser {
                         outer_instruction_index,
                         Some(inner_instruction_index),
                         execution_ordinal,
+                        &mut invocation_stack,
                     ) {
                         instruction_events.push(result);
                     }
@@ -114,14 +117,24 @@ impl TransactionParser {
         }
     }
 
-    fn parse_instruction(
+    fn parse_instruction<'a>(
         &self,
         instruction: &Value,
-        account_keys: &[&str],
+        account_keys: &[&'a str],
         outer_instruction_index: usize,
         inner_instruction_index: Option<usize>,
         execution_ordinal: usize,
+        invocation_stack: &mut Vec<NormalizedInstruction<'a>>,
     ) -> Option<InstructionEvents> {
+        let observed_stack_height = instruction
+            .get("stackHeight")
+            .and_then(Value::as_u64)
+            .and_then(|height| u32::try_from(height).ok());
+        align_invocation_stack(
+            invocation_stack,
+            inner_instruction_index,
+            observed_stack_height,
+        );
         let program_index = match instruction.get("programIdIndex").and_then(Value::as_u64) {
             Some(index) => index,
             None => {
@@ -268,8 +281,22 @@ impl TransactionParser {
             }
         };
 
-        let context = InstructionContext::new(program_id, &accounts, &data);
-        match self.dispatcher.dispatch(context) {
+        let parent = immediate_parent(invocation_stack, inner_instruction_index, stack_height)
+            .map(NormalizedInstruction::context);
+        let normalized = NormalizedInstruction {
+            program_id,
+            accounts,
+            data,
+            invocation_height: stack_height.or((inner_instruction_index.is_none()).then_some(1)),
+        };
+        let mut context = normalized.context();
+        if let Some(parent) = parent {
+            context = context.with_parent_instruction(parent);
+        }
+        let outcome = self.dispatcher.dispatch(context);
+        invocation_stack.push(normalized);
+
+        match outcome {
             DispatchOutcome::NoEvent => None,
             DispatchOutcome::Event(event) => Some(InstructionEvents {
                 program_id: Some(program_id.to_owned()),
@@ -288,6 +315,59 @@ impl TransactionParser {
                 result: Err(failure),
             }),
         }
+    }
+}
+
+struct NormalizedInstruction<'a> {
+    program_id: &'a str,
+    accounts: Vec<&'a str>,
+    data: Vec<u8>,
+    invocation_height: Option<u32>,
+}
+
+impl NormalizedInstruction<'_> {
+    fn context(&self) -> InstructionContext<'_> {
+        InstructionContext::new(self.program_id, &self.accounts, &self.data)
+    }
+}
+
+fn align_invocation_stack(
+    stack: &mut Vec<NormalizedInstruction<'_>>,
+    inner_instruction_index: Option<usize>,
+    stack_height: Option<u32>,
+) {
+    if inner_instruction_index.is_none() {
+        stack.clear();
+        return;
+    }
+
+    let Some(stack_height) = stack_height else {
+        stack.clear();
+        return;
+    };
+    while stack.last().is_some_and(|instruction| {
+        instruction
+            .invocation_height
+            .is_none_or(|height| height >= stack_height)
+    }) {
+        stack.pop();
+    }
+}
+
+fn immediate_parent<'a>(
+    stack: &'a [NormalizedInstruction<'_>],
+    inner_instruction_index: Option<usize>,
+    stack_height: Option<u32>,
+) -> Option<&'a NormalizedInstruction<'a>> {
+    inner_instruction_index?;
+    match stack_height {
+        Some(stack_height) => stack.last().filter(|instruction| {
+            instruction
+                .invocation_height
+                .and_then(|height| height.checked_add(1))
+                == Some(stack_height)
+        }),
+        None => None,
     }
 }
 
@@ -446,13 +526,13 @@ fn instruction_failure(
 
 #[cfg(test)]
 mod tests {
-    use common::{ParsedEvent, TokenDiscovery};
+    use common::{ParseError, ParsedEvent, TokenDiscovery, TokenSwap};
     use serde_json::json;
 
     use super::*;
     use crate::{
         test_support::{instruction, registry, test_event, transaction, TEST_PROGRAM_ID},
-        InstructionParseError,
+        InstructionParseError, ParserConfig, ParserName, ParserRegistry,
     };
 
     fn parser() -> TransactionParser {
@@ -553,6 +633,201 @@ mod tests {
         assert!(events.instructions[2].result.is_err());
         assert_eq!(events.instructions[3].outer_instruction_index, 1);
         assert_eq!(events.instructions[3].inner_instruction_index, Some(0));
+    }
+
+    #[test]
+    fn exposes_the_immediate_parent_for_nested_cpi_events() {
+        let entry = transaction(
+            "parent-context",
+            vec!["AggregatorProgram", TEST_PROGRAM_ID, "parent-account"],
+            vec![],
+            vec![],
+            vec![instruction(0, &[], &[], 1)],
+            vec![json!({
+                "index": 0,
+                "instructions": [
+                    instruction(1, &[2], &[0], 2),
+                    instruction(1, &[], &[4], 3),
+                ]
+            })],
+            Value::Null,
+        );
+
+        let events = parser().parse_transaction(&entry, 0).unwrap().unwrap();
+
+        assert_eq!(events.instructions.len(), 1);
+        assert_eq!(events.instructions[0].execution_ordinal, 2);
+        assert_eq!(
+            events.instructions[0].result,
+            Ok(ParsedEvent::TokenDiscovery(TokenDiscovery {
+                mint: "parent-account".to_owned(),
+                creator: "creator".to_owned(),
+                name: "Test Token".to_owned(),
+                symbol: "TEST".to_owned(),
+                uri: "https://example.com/token.json".to_owned(),
+            }))
+        );
+    }
+
+    #[test]
+    fn does_not_reuse_a_parent_after_an_unconfigured_sibling() {
+        let entry = transaction(
+            "stale-parent",
+            vec!["AggregatorProgram", TEST_PROGRAM_ID, "parent-account"],
+            vec![],
+            vec![],
+            vec![instruction(0, &[], &[], 1)],
+            vec![json!({
+                "index": 0,
+                "instructions": [
+                    instruction(1, &[2], &[0], 2),
+                    instruction(0, &[], &[], 2),
+                    instruction(1, &[], &[4], 3),
+                ]
+            })],
+            Value::Null,
+        );
+
+        let events = parser().parse_transaction(&entry, 0).unwrap().unwrap();
+
+        assert_eq!(events.instructions.len(), 1);
+        assert!(matches!(
+            &events.instructions[0].result,
+            Err(InstructionParseFailure {
+                error: InstructionParseError::Protocol(ParseError::InvalidInstructionData(reason)),
+                ..
+            }) if reason == "test instruction has no immediate parent"
+        ));
+    }
+
+    #[test]
+    fn does_not_reuse_a_parent_after_a_malformed_configured_sibling() {
+        let mut entry = transaction(
+            "malformed-sibling",
+            vec!["AggregatorProgram", TEST_PROGRAM_ID, "parent-account"],
+            vec![],
+            vec![],
+            vec![instruction(0, &[], &[], 1)],
+            vec![json!({
+                "index": 0,
+                "instructions": [
+                    instruction(1, &[2], &[0], 2),
+                    instruction(1, &[], &[], 2),
+                    instruction(1, &[], &[4], 3),
+                ]
+            })],
+            Value::Null,
+        );
+        entry["meta"]["innerInstructions"][0]["instructions"][1]["data"] = json!("0");
+
+        let events = parser().parse_transaction(&entry, 0).unwrap().unwrap();
+
+        assert_eq!(events.instructions.len(), 2);
+        assert!(matches!(
+            &events.instructions[1].result,
+            Err(InstructionParseFailure {
+                error: InstructionParseError::Protocol(ParseError::InvalidInstructionData(reason)),
+                ..
+            }) if reason == "test instruction has no immediate parent"
+        ));
+    }
+
+    #[test]
+    fn does_not_infer_a_parent_without_stack_height() {
+        let mut entry = transaction(
+            "missing-stack-height",
+            vec![TEST_PROGRAM_ID, "parent-account"],
+            vec![],
+            vec![],
+            vec![instruction(0, &[1], &[0], 1)],
+            vec![json!({
+                "index": 0,
+                "instructions": [instruction(0, &[], &[4], 2)]
+            })],
+            Value::Null,
+        );
+        entry["meta"]["innerInstructions"][0]["instructions"][0]["stackHeight"] = Value::Null;
+
+        let events = parser().parse_transaction(&entry, 0).unwrap().unwrap();
+
+        assert!(matches!(
+            &events.instructions[0].result,
+            Err(InstructionParseFailure {
+                error: InstructionParseError::Protocol(ParseError::InvalidInstructionData(reason)),
+                ..
+            }) if reason == "test instruction has no immediate parent"
+        ));
+    }
+
+    #[test]
+    fn parses_a_real_nested_pumpswap_event_through_the_registry() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../programs/pump/pumpswap/tests/fixtures/buy_mainnet.json"
+        ))
+        .unwrap();
+        let parent = &fixture["parent_instruction"];
+        let event = &fixture["event_instruction"];
+        let parent_accounts = parent["accounts"].as_array().unwrap();
+        let event_accounts = event["accounts"].as_array().unwrap();
+        let mut account_keys = vec!["AggregatorProgram", pumpswap::PROGRAM_ID];
+        for account in parent_accounts.iter().chain(event_accounts) {
+            let account = account.as_str().unwrap();
+            if !account_keys.contains(&account) {
+                account_keys.push(account);
+            }
+        }
+        let account_index = |account: &Value| {
+            account_keys
+                .iter()
+                .position(|key| *key == account.as_str().unwrap())
+                .unwrap()
+        };
+        let parent_account_indexes = parent_accounts
+            .iter()
+            .map(account_index)
+            .collect::<Vec<_>>();
+        let event_account_indexes = event_accounts.iter().map(account_index).collect::<Vec<_>>();
+        let parent_data = bs58::decode(parent["data"].as_str().unwrap())
+            .into_vec()
+            .unwrap();
+        let event_data = bs58::decode(event["data"].as_str().unwrap())
+            .into_vec()
+            .unwrap();
+        let entry = transaction(
+            fixture["signature"].as_str().unwrap(),
+            account_keys,
+            vec![],
+            vec![],
+            vec![instruction(0, &[], &[], 1)],
+            vec![json!({
+                "index": 0,
+                "instructions": [
+                    instruction(1, &parent_account_indexes, &parent_data, 2),
+                    instruction(1, &event_account_indexes, &event_data, 3),
+                ]
+            })],
+            Value::Null,
+        );
+        let config = ParserConfig::new(vec![ParserName::PumpSwap]).unwrap();
+        let parser = TransactionParser::new(InstructionDispatcher::new(
+            ParserRegistry::from_config(&config).unwrap(),
+        ));
+
+        let events = parser.parse_transaction(&entry, 0).unwrap().unwrap();
+
+        assert_eq!(events.instructions.len(), 1);
+        assert_eq!(events.instructions[0].execution_ordinal, 2);
+        assert_eq!(
+            events.instructions[0].result,
+            Ok(ParsedEvent::TokenSwap(TokenSwap {
+                user: "8nLd2NbuoGnj4YKKjwRo7Xkhw55V2dhhR1RQqWo7fYeA".to_owned(),
+                pool: "5tvUjENJmJie8HG8kuJsCjGgM1r6siRRiRSwnEcdte2b".to_owned(),
+                input_mint: "EfwTuoSdbvrUpWTU2uWapBGNXCgjM1zo7Codpeq4yup3".to_owned(),
+                input_amount: 8_411_309_631_679,
+                output_mint: "So11111111111111111111111111111111111111112".to_owned(),
+                output_amount: 12_823_278_553,
+            }))
+        );
     }
 
     #[test]

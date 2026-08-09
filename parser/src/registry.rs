@@ -52,6 +52,7 @@ impl ParserRegistry {
 fn create_parser(name: ParserName) -> Box<dyn InstructionParser> {
     match name {
         ParserName::PumpFun => Box::new(pumpfun::PumpFunParser),
+        ParserName::PumpSwap => Box::new(pumpswap::PumpSwapParser),
     }
 }
 
@@ -62,11 +63,12 @@ mod tests {
 
     #[test]
     fn builds_every_configured_parser_factory() {
-        let config = ParserConfig::new(vec![ParserName::PumpFun]).unwrap();
+        let config = ParserConfig::new(vec![ParserName::PumpFun, ParserName::PumpSwap]).unwrap();
         let registry = ParserRegistry::from_config(&config).unwrap();
 
-        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.len(), 2);
         assert!(registry.contains(pumpfun::PROGRAM_ID));
+        assert!(registry.contains(pumpswap::PROGRAM_ID));
         assert!(!registry.is_empty());
     }
 

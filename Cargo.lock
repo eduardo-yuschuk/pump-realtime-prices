@@ -345,6 +345,7 @@ dependencies = [
  "common",
  "dotenvy",
  "pumpfun",
+ "pumpswap",
  "serde_json",
 ]
 
@@ -386,7 +387,10 @@ dependencies = [
 name = "pumpswap"
 version = "0.1.0"
 dependencies = [
+ "bs58",
  "common",
+ "serde_json",
+ "solana-pubkey",
 ]
 
 [[package]]

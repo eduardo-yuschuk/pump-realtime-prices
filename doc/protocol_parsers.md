@@ -19,3 +19,9 @@ If official sources are unavailable, ambiguous, or inconsistent with observed on
 ## Pump.fun Baseline
 
 The Pump.fun parser uses commit [`9c82f61cb711b044a17f770ab8ce9f9bdf78f333`](https://github.com/pump-fun/pump-public-docs/commit/9c82f61cb711b044a17f770ab8ce9f9bdf78f333) of the official `pump-fun/pump-public-docs` repository, including `idl/pump.json`, as its primary specification. Its supported layouts are checked against the successful mainnet instructions identified by the fixtures under `programs/pump/pumpfun/tests/fixtures/`.
+
+## PumpSwap Baseline
+
+The PumpSwap parser uses commit [`2c22246b670812e2392e5f94b9543f500d6c9e15`](https://github.com/pump-fun/pump-public-docs/commit/2c22246b670812e2392e5f94b9543f500d6c9e15) of the official `pump-fun/pump-public-docs` repository, including `idl/pump_amm.json` and `docs/PUMP_SWAP_README.md`, as its primary specification. Its `BuyEvent` and `SellEvent` layouts are checked against successful mainnet self-CPI instructions identified by the fixtures under `programs/pump/pumpswap/tests/fixtures/`.
+
+The IDL declares a trailing `track_volume: OptionBool` argument for `buy_exact_quote_in`, but the successful mainnet instruction at slot `438131164` in fixture `buy_exact_quote_in_mainnet.json` omits that byte. The parser therefore requires the observed discriminator and two `u64` argument prefix for this parent instruction, does not infer a `track_volume` value, and obtains all executed amounts from the correlated `BuyEvent`.
