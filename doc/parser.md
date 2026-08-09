@@ -215,7 +215,7 @@ The future real-time source must not rebuild parser configuration or the registr
 
 To add a protocol to the standard configured pipeline:
 
-1. Follow `doc/protocol_parsers.md` and identify versioned official layouts plus successful on-chain fixtures.
+1. Use `doc/DEX.md` and `doc/MEME.md` as candidate-discovery references when relevant, then follow `doc/protocol_parsers.md` and identify versioned official layouts plus successful on-chain fixtures.
 2. Implement a crate under `programs/` that depends on `common` and implements `InstructionParser`.
 3. Expose the protocol program ID and ensure `program_id()` returns it.
 4. Add the protocol crate to the workspace and to `parser` dependencies.

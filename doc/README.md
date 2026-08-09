@@ -20,3 +20,10 @@ For example, slot `123456789` is stored in `sample_data/123456789.json.gz`.
 ## Implementation Policies
 
 - [Protocol parser source policy](protocol_parsers.md): required authoritative sources and real-data validation for protocol integrations.
+
+## Protocol Research References
+
+- [Solana DEX landscape](DEX.md): time-stamped DEX candidates, protocol models, and initial public-source discovery for future swap parsers.
+- [Solana memecoin platform landscape](MEME.md): time-stamped launchpad and bonding-curve candidates for future token-discovery and swap parsers.
+
+These externally contributed snapshots are prioritization references, not implementation specifications. Their market metrics and source-availability assessments must be refreshed, and every parser must still follow the protocol parser source policy.
