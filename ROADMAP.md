@@ -40,6 +40,8 @@
 - [x] Add a root script to run the standalone indexer.
 - [x] Create a `saver` workspace library that persists parsed `TokenSwap` events as latest token pair prices in PostgreSQL.
 - [x] Enrich parser transaction output with token mint decimals from RPC token balances and integrate `saver` into the standalone indexer.
+- [x] Batch PostgreSQL token pair price upserts per block while preserving the last swap for each liquidity provider.
+- [x] Include PostgreSQL batch write duration in standalone indexer block summaries.
 
 ## Documentation
 

@@ -109,20 +109,22 @@ pub struct BlockSummary {
     pub events: usize,
     pub failures: usize,
     pub parse_duration: Duration,
+    pub database_write_duration: Duration,
 }
 
 impl fmt::Display for BlockSummary {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "Block slot={}: transactions={} parsed_transactions={} results={} events={} failures={} parse_time_ms={:.3}",
+            "Block slot={}: transactions={} parsed_transactions={} results={} events={} failures={} parse_time_ms={:.3} database_write_time_ms={:.3}",
             self.slot,
             self.block_transactions,
             self.parsed_transactions,
             self.results,
             self.events,
             self.failures,
-            self.parse_duration.as_secs_f64() * 1_000.0
+            self.parse_duration.as_secs_f64() * 1_000.0,
+            self.database_write_duration.as_secs_f64() * 1_000.0
         )
     }
 }
@@ -240,12 +242,14 @@ async fn receive_blocks(
                     continue;
                 }
                 match process_notification_events(&message, parser) {
-                    Ok(Some((summary, events))) => {
+                    Ok(Some((mut summary, events))) => {
+                        let save_started_at = Instant::now();
                         saver
                             .save_block_events(&events)
                             .await
                             .map_err(ProcessingError::Save)
                             .map_err(|error| error.to_string())?;
+                        summary.database_write_duration = save_started_at.elapsed();
                         println!("{summary}");
                     }
                     Ok(None) => {}
@@ -330,6 +334,7 @@ fn summarize_block(
         events: event_count,
         failures: results - event_count,
         parse_duration,
+        database_write_duration: Duration::ZERO,
     }
 }
 
@@ -394,6 +399,7 @@ mod tests {
         assert_eq!(summary.results, 0);
         assert_eq!(summary.events, 0);
         assert_eq!(summary.failures, 0);
+        assert_eq!(summary.database_write_duration, Duration::ZERO);
     }
 
     #[test]
@@ -434,9 +440,10 @@ mod tests {
                 events: 2,
                 failures: 1,
                 parse_duration: Duration::from_micros(1_500),
+                database_write_duration: Duration::from_micros(2_500),
             }
             .to_string(),
-            "Block slot=42: transactions=12 parsed_transactions=2 results=3 events=2 failures=1 parse_time_ms=1.500"
+            "Block slot=42: transactions=12 parsed_transactions=2 results=3 events=2 failures=1 parse_time_ms=1.500 database_write_time_ms=2.500"
         );
     }
 

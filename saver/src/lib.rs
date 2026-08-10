@@ -20,7 +20,35 @@ const UPSERT_TOKEN_PAIR_PRICE: &str = "
         quote_amount,
         base_token_decimals,
         quote_token_decimals
-    ) VALUES ($1, $2, $3, $4, $5::TEXT::NUMERIC, $6::TEXT::NUMERIC, $7, $8)
+    )
+    SELECT
+        liquidity_provider_address,
+        liquidity_provider_kind,
+        base_token_address,
+        quote_token_address,
+        base_amount::NUMERIC,
+        quote_amount::NUMERIC,
+        base_token_decimals,
+        quote_token_decimals
+    FROM UNNEST(
+        $1::TEXT[],
+        $2::TEXT[],
+        $3::TEXT[],
+        $4::TEXT[],
+        $5::TEXT[],
+        $6::TEXT[],
+        $7::SMALLINT[],
+        $8::SMALLINT[]
+    ) AS batch(
+        liquidity_provider_address,
+        liquidity_provider_kind,
+        base_token_address,
+        quote_token_address,
+        base_amount,
+        quote_amount,
+        base_token_decimals,
+        quote_token_decimals
+    )
     ON CONFLICT (liquidity_provider_address) DO UPDATE SET
         liquidity_provider_kind = EXCLUDED.liquidity_provider_kind,
         base_token_address = EXCLUDED.base_token_address,
@@ -162,71 +190,107 @@ impl Saver {
     }
 
     pub async fn save_block_events(&mut self, events: &BlockEvents) -> Result<usize, SaverError> {
-        let transaction = self
-            .client
-            .transaction()
+        let prices = collect_token_pair_prices(events)?;
+        if prices.is_empty() {
+            return Ok(0);
+        }
+
+        let liquidity_provider_addresses: Vec<_> = prices
+            .iter()
+            .map(|price| price.liquidity_provider_address.as_str())
+            .collect();
+        let liquidity_provider_kinds: Vec<_> = prices
+            .iter()
+            .map(|price| price.liquidity_provider_kind)
+            .collect();
+        let base_token_addresses: Vec<_> = prices
+            .iter()
+            .map(|price| price.base_token_address.as_str())
+            .collect();
+        let quote_token_addresses: Vec<_> = prices
+            .iter()
+            .map(|price| price.quote_token_address.as_str())
+            .collect();
+        let base_amounts: Vec<_> = prices
+            .iter()
+            .map(|price| price.base_amount.to_string())
+            .collect();
+        let quote_amounts: Vec<_> = prices
+            .iter()
+            .map(|price| price.quote_amount.to_string())
+            .collect();
+        let base_token_decimals: Vec<_> = prices
+            .iter()
+            .map(|price| price.base_token_decimals as i16)
+            .collect();
+        let quote_token_decimals: Vec<_> = prices
+            .iter()
+            .map(|price| price.quote_token_decimals as i16)
+            .collect();
+
+        // println!("Saving token pair price batch: {prices:?}");
+        self.client
+            .execute(
+                UPSERT_TOKEN_PAIR_PRICE,
+                &[
+                    &liquidity_provider_addresses,
+                    &liquidity_provider_kinds,
+                    &base_token_addresses,
+                    &quote_token_addresses,
+                    &base_amounts,
+                    &quote_amounts,
+                    &base_token_decimals,
+                    &quote_token_decimals,
+                ],
+            )
             .await
             .map_err(SaverError::Database)?;
-        let mut saved = 0;
 
-        for transaction_events in &events.transactions {
-            for instruction in &transaction_events.instructions {
-                let Ok(ParsedEvent::TokenSwap(swap)) = &instruction.result else {
-                    continue;
-                };
-                let price = token_pair_price(transaction_events, instruction, swap)?;
-                println!(
-                    "Saving token pair price: liquidity_provider_address={} liquidity_provider_kind={} base_token_address={} quote_token_address={} base_amount={} quote_amount={} base_token_decimals={} quote_token_decimals={}",
-                    price.liquidity_provider_address,
-                    price.liquidity_provider_kind,
-                    price.base_token_address,
-                    price.quote_token_address,
-                    price.base_amount,
-                    price.quote_amount,
-                    price.base_token_decimals,
-                    price.quote_token_decimals,
-                );
-                transaction
-                    .execute(
-                        UPSERT_TOKEN_PAIR_PRICE,
-                        &[
-                            &price.liquidity_provider_address,
-                            &price.liquidity_provider_kind,
-                            &price.base_token_address,
-                            &price.quote_token_address,
-                            &price.base_amount.to_string(),
-                            &price.quote_amount.to_string(),
-                            &(price.base_token_decimals as i16),
-                            &(price.quote_token_decimals as i16),
-                        ],
-                    )
-                    .await
-                    .map_err(SaverError::Database)?;
-                saved += 1;
-            }
-        }
-        transaction.commit().await.map_err(SaverError::Database)?;
-
-        Ok(saved)
+        Ok(prices.len())
     }
 }
 
-struct TokenPairPrice<'a> {
-    liquidity_provider_address: &'a str,
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TokenPairPrice {
+    liquidity_provider_address: String,
     liquidity_provider_kind: &'static str,
-    base_token_address: &'a str,
-    quote_token_address: &'a str,
+    base_token_address: String,
+    quote_token_address: String,
     base_amount: u64,
     quote_amount: u64,
     base_token_decimals: u8,
     quote_token_decimals: u8,
 }
 
-fn token_pair_price<'a>(
-    transaction: &'a TransactionEvents,
-    instruction: &'a InstructionEvents,
-    swap: &'a TokenSwap,
-) -> Result<TokenPairPrice<'a>, SaverError> {
+fn collect_token_pair_prices(events: &BlockEvents) -> Result<Vec<TokenPairPrice>, SaverError> {
+    let mut prices = Vec::new();
+
+    for transaction in &events.transactions {
+        for instruction in &transaction.instructions {
+            let Ok(ParsedEvent::TokenSwap(swap)) = &instruction.result else {
+                continue;
+            };
+            prices.push(token_pair_price(transaction, instruction, swap)?);
+        }
+    }
+
+    Ok(deduplicate_token_pair_prices(prices))
+}
+
+fn deduplicate_token_pair_prices(prices: Vec<TokenPairPrice>) -> Vec<TokenPairPrice> {
+    prices
+        .into_iter()
+        .map(|price| (price.liquidity_provider_address.clone(), price))
+        .collect::<BTreeMap<_, _>>()
+        .into_values()
+        .collect()
+}
+
+fn token_pair_price(
+    transaction: &TransactionEvents,
+    instruction: &InstructionEvents,
+    swap: &TokenSwap,
+) -> Result<TokenPairPrice, SaverError> {
     let program_id = instruction
         .program_id
         .as_deref()
@@ -242,10 +306,10 @@ fn token_pair_price<'a>(
     };
 
     Ok(TokenPairPrice {
-        liquidity_provider_address: &swap.pool,
+        liquidity_provider_address: swap.pool.clone(),
         liquidity_provider_kind,
-        base_token_address: &swap.input_mint,
-        quote_token_address: &swap.output_mint,
+        base_token_address: swap.input_mint.clone(),
+        quote_token_address: swap.output_mint.clone(),
         base_amount: swap.input_amount,
         quote_amount: swap.output_amount,
         base_token_decimals: token_decimals(&transaction.token_decimals, &swap.input_mint)?,
@@ -314,6 +378,19 @@ mod tests {
         }
     }
 
+    fn price(pool: &str, base_amount: u64) -> TokenPairPrice {
+        TokenPairPrice {
+            liquidity_provider_address: pool.to_owned(),
+            liquidity_provider_kind: "amm",
+            base_token_address: "base-mint".to_owned(),
+            quote_token_address: "quote-mint".to_owned(),
+            base_amount,
+            quote_amount: 456,
+            base_token_decimals: 6,
+            quote_token_decimals: 9,
+        }
+    }
+
     #[test]
     fn maps_pumpfun_swaps_to_bonding_curve_prices() {
         let transaction = transaction(BTreeMap::from([
@@ -367,5 +444,26 @@ mod tests {
             token_pair_price(&transaction, &instruction, &swap()),
             Err(SaverError::MissingTokenDecimals(mint)) if mint == "input-mint"
         ));
+    }
+
+    #[test]
+    fn keeps_the_last_price_for_each_liquidity_provider_in_a_batch() {
+        let prices = deduplicate_token_pair_prices(vec![
+            price("first-pool", 1),
+            price("second-pool", 2),
+            price("first-pool", 3),
+        ]);
+
+        assert_eq!(
+            prices,
+            vec![price("first-pool", 3), price("second-pool", 2)]
+        );
+    }
+
+    #[test]
+    fn uses_unnest_for_the_batch_upsert() {
+        assert!(UPSERT_TOKEN_PAIR_PRICE.contains("FROM UNNEST("));
+        assert!(UPSERT_TOKEN_PAIR_PRICE.contains("$5::TEXT[]"));
+        assert!(UPSERT_TOKEN_PAIR_PRICE.contains("$6::TEXT[]"));
     }
 }
