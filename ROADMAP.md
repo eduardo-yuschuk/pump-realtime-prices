@@ -44,6 +44,7 @@
 - [x] Document the public `block_loader` crate contract.
 - [x] Document the block parsing architecture, `PARSERS` configuration, parser registry lifecycle, validator instruction ordering, ordered event/error output contract, and the boundary through which a future real-time block stream will invoke `BlockParser`.
 - [x] Add an English `.env.example` documenting the strict comma-separated `PARSERS=pumpfun,pumpswap` configuration.
+- [x] Define Solana JSON-RPC and WebSocket endpoint variables in `.env.example`.
 - [x] Add externally contributed DEX and memecoin protocol landscape references for prioritizing future parser integrations.
 
 ## Repository Maintenance
