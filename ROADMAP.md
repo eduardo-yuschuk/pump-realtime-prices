@@ -23,7 +23,7 @@
 - [x] Add `InstructionDispatcher` tests covering configured and unconfigured programs, event propagation, no-event results, and recoverable protocol parser failures.
 - [x] Add `TransactionParser` tests covering legacy and versioned transactions, loaded address resolution, base58 decoding, nested CPI ordering by `stackHeight`, failed transaction filtering, malformed transaction data, and partial event/error collection.
 - [x] Add `BlockParser` tests against real block fixtures covering transaction order, instruction execution order, multiple protocol events, filtered empty transactions, and continued parsing after instruction-scoped failures.
-- [ ] Implement `tools/get_json_transaction.sh` to accept a transaction signature, fetch its full JSON transaction from Solana RPC, and store the formatted response as `sample_data/<signature>.json.gz`.
+- [x] Implement `tools/get_json_transaction.sh` to accept a transaction signature, fetch its full JSON transaction from Solana RPC, and store the formatted response as `sample_data/<signature>.json.gz`.
 - [x] Create a `util/transaction_loader` workspace library crate with the same public traversable `serde_json::Value` boundary used by `block_loader`.
 - [x] Implement a public `transaction_loader` function that loads a gzip-compressed transaction JSON file from disk.
 - [x] Implement a public `transaction_loader` function that loads an uncompressed transaction JSON file from disk.
