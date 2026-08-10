@@ -35,6 +35,7 @@
 - [x] Add tests for the visual transaction inspector covering argument validation, missing fixtures, protocol selection, and rendered parsed events.
 - [x] Implement the PumpSwap parser. It must return the applicable shared `ParsedEvent` variant, or `Ok(None)` when the instruction produces no modeled event.
 - [x] Add tests for all public PumpSwap parsing functions and their error handling.
+- [x] Add a PostgreSQL schema for storing the latest token pair price by AMM or bonding curve address.
 
 ## Documentation
 
