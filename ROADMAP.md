@@ -36,6 +36,8 @@
 - [x] Implement the PumpSwap parser. It must return the applicable shared `ParsedEvent` variant, or `Ok(None)` when the instruction produces no modeled event.
 - [x] Add tests for all public PumpSwap parsing functions and their error handling.
 - [x] Add a PostgreSQL schema for storing the latest token pair price by AMM or bonding curve address.
+- [x] Create a standalone WebSocket indexer that subscribes to finalized full blocks, reconnects, parses them, and prints result summaries with parsing time.
+- [x] Add a root script to run the standalone indexer.
 
 ## Documentation
 
