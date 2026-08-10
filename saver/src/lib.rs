@@ -20,7 +20,7 @@ const UPSERT_TOKEN_PAIR_PRICE: &str = "
         quote_amount,
         base_token_decimals,
         quote_token_decimals
-    ) VALUES ($1, $2, $3, $4, $5::NUMERIC, $6::NUMERIC, $7, $8)
+    ) VALUES ($1, $2, $3, $4, $5::TEXT::NUMERIC, $6::TEXT::NUMERIC, $7, $8)
     ON CONFLICT (liquidity_provider_address) DO UPDATE SET
         liquidity_provider_kind = EXCLUDED.liquidity_provider_kind,
         base_token_address = EXCLUDED.base_token_address,
@@ -175,6 +175,17 @@ impl Saver {
                     continue;
                 };
                 let price = token_pair_price(transaction_events, instruction, swap)?;
+                println!(
+                    "Saving token pair price: liquidity_provider_address={} liquidity_provider_kind={} base_token_address={} quote_token_address={} base_amount={} quote_amount={} base_token_decimals={} quote_token_decimals={}",
+                    price.liquidity_provider_address,
+                    price.liquidity_provider_kind,
+                    price.base_token_address,
+                    price.quote_token_address,
+                    price.base_amount,
+                    price.quote_amount,
+                    price.base_token_decimals,
+                    price.quote_token_decimals,
+                );
                 transaction
                     .execute(
                         UPSERT_TOKEN_PAIR_PRICE,
