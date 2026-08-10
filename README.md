@@ -55,6 +55,24 @@ cargo test --workspace
 - `programs/pump/pumpfun`: crate for the Pump.fun integration.
 - `programs/pump/pumpswap`: crate for the PumpSwap integration.
 - `util/block_loader`: library crate for loading Solana blocks.
+- `saver`: library crate that stores the latest parsed token pair price for each supported liquidity provider.
+
+## Database Configuration
+
+`saver` reads these PostgreSQL variables from the process environment. The standalone indexer loads them from `.env` during startup:
+
+```dotenv
+DB_PORT=5432
+DB_USERNAME=
+DB_NAME=
+DB_PASSWORD=
+DB_HOST=
+DB_DISABLE_SSL=false
+```
+
+Set `DB_DISABLE_SSL=false` to require a TLS connection using WebPKI root certificates. Set it to `true` only for a trusted local PostgreSQL instance.
+
+For every `TokenSwap`, `saver` stores the input mint and raw input amount as the base side, and the output mint and raw output amount as the quote side.
 
 ## Sample Data
 

@@ -9,6 +9,7 @@ use std::{
 
 use futures_util::{SinkExt, StreamExt};
 use parser::{BlockEvents, BlockParseError, BlockParser, ParserInitError};
+use saver::{Saver, SaverError};
 use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -20,6 +21,7 @@ pub enum IndexerError {
     MissingWebSocketUrl,
     NonUnicodeWebSocketUrl,
     Parser(ParserInitError),
+    Saver(SaverError),
     TlsProvider,
 }
 
@@ -32,6 +34,7 @@ impl fmt::Display for IndexerError {
                 formatter.write_str("SOLANA_WS_URL is not valid Unicode")
             }
             Self::Parser(error) => write!(formatter, "failed to initialize block parser: {error}"),
+            Self::Saver(error) => write!(formatter, "failed to initialize saver: {error}"),
             Self::TlsProvider => {
                 formatter.write_str("failed to configure the Rustls crypto provider")
             }
@@ -43,6 +46,7 @@ impl Error for IndexerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Parser(error) => Some(error),
+            Self::Saver(error) => Some(error),
             _ => None,
         }
     }
@@ -73,6 +77,7 @@ impl Error for NotificationError {}
 pub enum ProcessingError {
     Notification(NotificationError),
     Parse(BlockParseError),
+    Save(SaverError),
 }
 
 impl fmt::Display for ProcessingError {
@@ -80,6 +85,7 @@ impl fmt::Display for ProcessingError {
         match self {
             Self::Notification(error) => write!(formatter, "invalid block notification: {error}"),
             Self::Parse(error) => write!(formatter, "failed to parse block: {error}"),
+            Self::Save(error) => write!(formatter, "failed to save block events: {error}"),
         }
     }
 }
@@ -89,6 +95,7 @@ impl Error for ProcessingError {
         match self {
             Self::Notification(error) => Some(error),
             Self::Parse(error) => Some(error),
+            Self::Save(error) => Some(error),
         }
     }
 }
@@ -135,9 +142,10 @@ pub async fn run() -> Result<(), IndexerError> {
         env::VarError::NotUnicode(_) => IndexerError::NonUnicodeWebSocketUrl,
     })?;
     let parser = BlockParser::from_env().map_err(IndexerError::Parser)?;
+    let mut saver = Saver::from_env().await.map_err(IndexerError::Saver)?;
 
     loop {
-        if let Err(error) = receive_blocks(&websocket_url, &parser).await {
+        if let Err(error) = receive_blocks(&websocket_url, &parser, &mut saver).await {
             eprintln!("WebSocket session ended: {error}; reconnecting in 5 seconds");
         }
         tokio::time::sleep(RECONNECT_DELAY).await;
@@ -166,6 +174,13 @@ pub fn process_notification(
     message: &Value,
     parser: &BlockParser,
 ) -> Result<Option<BlockSummary>, ProcessingError> {
+    Ok(process_notification_events(message, parser)?.map(|(summary, _)| summary))
+}
+
+fn process_notification_events(
+    message: &Value,
+    parser: &BlockParser,
+) -> Result<Option<(BlockSummary, BlockEvents)>, ProcessingError> {
     let Some(notification) =
         extract_block_notification(message).map_err(ProcessingError::Notification)?
     else {
@@ -177,12 +192,14 @@ pub fn process_notification(
         .map_err(ProcessingError::Parse)?;
     let parse_duration = parse_started_at.elapsed();
 
-    Ok(Some(summarize_block(
+    let summary = summarize_block(
         notification.slot,
         notification.block,
         &events,
         parse_duration,
-    )))
+    );
+
+    Ok(Some((summary, events)))
 }
 
 fn load_dotenv() -> Result<(), IndexerError> {
@@ -193,7 +210,11 @@ fn load_dotenv() -> Result<(), IndexerError> {
     }
 }
 
-async fn receive_blocks(websocket_url: &str, parser: &BlockParser) -> Result<(), String> {
+async fn receive_blocks(
+    websocket_url: &str,
+    parser: &BlockParser,
+    saver: &mut Saver,
+) -> Result<(), String> {
     eprintln!(
         "Connecting to Solana WebSocket endpoint: {}",
         redact_endpoint(websocket_url)
@@ -218,8 +239,15 @@ async fn receive_blocks(websocket_url: &str, parser: &BlockParser) -> Result<(),
                     eprintln!("Subscribed to finalized Solana blocks");
                     continue;
                 }
-                match process_notification(&message, parser) {
-                    Ok(Some(summary)) => println!("{summary}"),
+                match process_notification_events(&message, parser) {
+                    Ok(Some((summary, events))) => {
+                        saver
+                            .save_block_events(&events)
+                            .await
+                            .map_err(ProcessingError::Save)
+                            .map_err(|error| error.to_string())?;
+                        println!("{summary}");
+                    }
                     Ok(None) => {}
                     Err(error) => eprintln!("{error}"),
                 }

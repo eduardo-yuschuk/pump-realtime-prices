@@ -188,6 +188,8 @@ The output omits:
 
 `InstructionEvents::result` keeps a detected event or a recoverable instruction-scoped failure at the instruction's ordered position. These failures include instruction normalization errors and errors returned by a protocol parser.
 
+Each `TransactionEvents` also includes `token_decimals`, a mint-address map collected from the transaction's `meta.preTokenBalances` and `meta.postTokenBalances`. This preserves the decimals required to persist raw `TokenSwap` amounts without making protocol parsers depend on token account balance data.
+
 Structural errors are different. An invalid block shape or a malformed successful transaction returns `BlockParseError` or `TransactionParseError` and aborts the current `parse_block` call. Structural errors are not embedded in `BlockEvents`.
 
 ## Input and Real-Time Boundaries

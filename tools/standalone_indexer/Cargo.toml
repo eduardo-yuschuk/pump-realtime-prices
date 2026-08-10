@@ -14,6 +14,7 @@ dotenvy.workspace = true
 futures-util.workspace = true
 parser = { path = "../../parser" }
 rustls.workspace = true
+saver = { path = "../../saver" }
 serde_json.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true

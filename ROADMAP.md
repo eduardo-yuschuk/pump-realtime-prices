@@ -38,6 +38,8 @@
 - [x] Add a PostgreSQL schema for storing the latest token pair price by AMM or bonding curve address.
 - [x] Create a standalone WebSocket indexer that subscribes to finalized full blocks, reconnects, parses them, and prints result summaries with parsing time.
 - [x] Add a root script to run the standalone indexer.
+- [x] Create a `saver` workspace library that persists parsed `TokenSwap` events as latest token pair prices in PostgreSQL.
+- [x] Enrich parser transaction output with token mint decimals from RPC token balances and integrate `saver` into the standalone indexer.
 
 ## Documentation
 
@@ -48,6 +50,7 @@
 - [x] Add an English `.env.example` documenting the strict comma-separated `PARSERS=pumpfun,pumpswap` configuration.
 - [x] Define Solana JSON-RPC and WebSocket endpoint variables in `.env.example`.
 - [x] Add externally contributed DEX and memecoin protocol landscape references for prioritizing future parser integrations.
+- [x] Document PostgreSQL environment configuration for token pair price persistence.
 
 ## Repository Maintenance
 

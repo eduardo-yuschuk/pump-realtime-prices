@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use common::ParsedEvent;
 
 use crate::InstructionParseFailure;
@@ -11,6 +13,8 @@ pub struct BlockEvents {
 pub struct TransactionEvents {
     pub signature: String,
     pub transaction_index: usize,
+    /// Mint decimals reported by the transaction's token balances.
+    pub token_decimals: BTreeMap<String, u8>,
     pub instructions: Vec<InstructionEvents>,
 }
 

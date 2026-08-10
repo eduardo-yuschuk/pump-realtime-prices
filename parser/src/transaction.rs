@@ -70,6 +70,7 @@ impl TransactionParser {
         let account_keys = resolve_account_keys(message, meta)?;
         let inner_instruction_groups =
             resolve_inner_instruction_groups(meta, outer_instructions.len())?;
+        let token_decimals = resolve_token_decimals(meta);
 
         let mut execution_ordinal = 0;
         let mut instruction_events = Vec::new();
@@ -112,6 +113,7 @@ impl TransactionParser {
             Ok(Some(TransactionEvents {
                 signature: signature.to_owned(),
                 transaction_index,
+                token_decimals,
                 instructions: instruction_events,
             }))
         }
@@ -505,6 +507,31 @@ fn resolve_inner_instruction_groups(
     Ok(resolved)
 }
 
+fn resolve_token_decimals(meta: &serde_json::Map<String, Value>) -> BTreeMap<String, u8> {
+    let mut token_decimals = BTreeMap::new();
+
+    for field in ["preTokenBalances", "postTokenBalances"] {
+        let Some(balances) = meta.get(field).and_then(Value::as_array) else {
+            continue;
+        };
+        for balance in balances {
+            let Some(mint) = balance.get("mint").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(decimals) = balance
+                .pointer("/uiTokenAmount/decimals")
+                .and_then(Value::as_u64)
+                .and_then(|decimals| u8::try_from(decimals).ok())
+            else {
+                continue;
+            };
+            token_decimals.insert(mint.to_owned(), decimals);
+        }
+    }
+
+    token_decimals
+}
+
 fn instruction_failure(
     program_id: Option<&str>,
     outer_instruction_index: usize,
@@ -526,6 +553,8 @@ fn instruction_failure(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use common::{ParseError, ParsedEvent, TokenDiscovery, TokenSwap};
     use serde_json::json;
 
@@ -563,6 +592,34 @@ mod tests {
         assert_eq!(events.instructions.len(), 1);
         assert_eq!(events.instructions[0].execution_ordinal, 0);
         assert_eq!(events.instructions[0].result, Ok(test_event()));
+        assert_eq!(events.token_decimals, BTreeMap::new());
+    }
+
+    #[test]
+    fn collects_token_decimals_from_pre_and_post_balances() {
+        let mut entry = transaction(
+            "token-decimals",
+            vec![TEST_PROGRAM_ID],
+            vec![],
+            vec![],
+            vec![instruction(0, &[], &[1], 1)],
+            vec![],
+            Value::Null,
+        );
+        entry["meta"]["preTokenBalances"] = json!([
+            { "mint": "input-mint", "uiTokenAmount": { "decimals": 9 } }
+        ]);
+        entry["meta"]["postTokenBalances"] = json!([
+            { "mint": "output-mint", "uiTokenAmount": { "decimals": 6 } },
+            { "mint": 42, "uiTokenAmount": { "decimals": 6 } }
+        ]);
+
+        let events = parser().parse_transaction(&entry, 0).unwrap().unwrap();
+
+        assert_eq!(
+            events.token_decimals,
+            BTreeMap::from([("input-mint".to_owned(), 9), ("output-mint".to_owned(), 6),])
+        );
     }
 
     #[test]

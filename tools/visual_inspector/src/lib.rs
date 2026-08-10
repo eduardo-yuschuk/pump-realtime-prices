@@ -324,6 +324,7 @@ mod tests {
         let transaction = TransactionEvents {
             signature: SIGNATURE.to_owned(),
             transaction_index: 0,
+            token_decimals: Default::default(),
             instructions: vec![InstructionEvents {
                 program_id: None,
                 outer_instruction_index: 2,
