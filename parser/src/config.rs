@@ -121,8 +121,10 @@ mod tests {
         }
 
         fn use_temporary_directory(&mut self) {
-            let directory =
-                env::temp_dir().join(format!("the-cow-parser-dotenv-{}", std::process::id()));
+            let directory = env::temp_dir().join(format!(
+                "pump-realtime-prices-parser-dotenv-{}",
+                std::process::id()
+            ));
             fs::create_dir_all(&directory).unwrap();
             env::set_current_dir(&directory).unwrap();
             self.temporary_directory = Some(directory);

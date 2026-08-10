@@ -56,6 +56,7 @@
 
 ## Repository Maintenance
 
+- [x] Rename the project to `pump_realtime_prices`.
 - [x] Add Rust build artifact exclusions.
 - [x] Add the `commit-push` workflow skill.
 - [x] Add project-scoped Solana MCP server configuration.

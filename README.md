@@ -1,4 +1,4 @@
-# the_cow
+# pump_realtime_prices
 
 Rust workspace for shared components and integrations with the Pump.fun and PumpSwap programs.
 
