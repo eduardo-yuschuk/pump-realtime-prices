@@ -121,6 +121,7 @@ pub enum SaverError {
     DecimalOverflow(&'static str),
     ZeroBaseAmount,
     UnsupportedTokenSwapProgram(String),
+    PumpfunSwapWithoutWrappedSol,
     MissingTokenDecimals(String),
 }
 
@@ -154,6 +155,9 @@ impl fmt::Display for SaverError {
                     formatter,
                     "cannot save TokenSwap from unsupported program {program_id}"
                 )
+            }
+            Self::PumpfunSwapWithoutWrappedSol => {
+                formatter.write_str("Pump.fun bonding curve swap does not include wrapped SOL")
             }
             Self::MissingTokenDecimals(mint) => {
                 write!(
@@ -424,7 +428,11 @@ fn collect_token_pair_prices(events: &BlockEvents) -> Result<Vec<TokenPairPrice>
             let Ok(ParsedEvent::TokenSwap(swap)) = &instruction.result else {
                 continue;
             };
-            prices.push(token_pair_price(transaction, instruction, swap)?);
+            match token_pair_price(transaction, instruction, swap) {
+                Ok(price) => prices.push(price),
+                Err(SaverError::PumpfunSwapWithoutWrappedSol) => continue,
+                Err(error) => return Err(error),
+            }
         }
     }
 
@@ -459,15 +467,55 @@ fn token_pair_price(
         }
     };
 
+    let (
+        base_token_address,
+        quote_token_address,
+        base_amount,
+        quote_amount,
+        base_token_decimals,
+        quote_token_decimals,
+    ) = match liquidity_provider_kind {
+        LiquidityProviderKind::Amm => (
+            swap.input_mint.clone(),
+            swap.output_mint.clone(),
+            swap.input_amount,
+            swap.output_amount,
+            token_decimals(&transaction.token_decimals, &swap.input_mint)?,
+            token_decimals(&transaction.token_decimals, &swap.output_mint)?,
+        ),
+        LiquidityProviderKind::BondingCurve => match (
+            swap.input_mint == WRAPPED_SOL_MINT,
+            swap.output_mint == WRAPPED_SOL_MINT,
+        ) {
+            (false, true) => (
+                swap.input_mint.clone(),
+                swap.output_mint.clone(),
+                swap.input_amount,
+                swap.output_amount,
+                token_decimals(&transaction.token_decimals, &swap.input_mint)?,
+                token_decimals(&transaction.token_decimals, &swap.output_mint)?,
+            ),
+            (true, false) => (
+                swap.output_mint.clone(),
+                swap.input_mint.clone(),
+                swap.output_amount,
+                swap.input_amount,
+                token_decimals(&transaction.token_decimals, &swap.output_mint)?,
+                token_decimals(&transaction.token_decimals, &swap.input_mint)?,
+            ),
+            _ => return Err(SaverError::PumpfunSwapWithoutWrappedSol),
+        },
+    };
+
     Ok(TokenPairPrice {
         liquidity_provider_address: swap.pool.clone(),
         liquidity_provider_kind,
-        base_token_address: swap.input_mint.clone(),
-        quote_token_address: swap.output_mint.clone(),
-        base_amount: swap.input_amount,
-        quote_amount: swap.output_amount,
-        base_token_decimals: token_decimals(&transaction.token_decimals, &swap.input_mint)?,
-        quote_token_decimals: token_decimals(&transaction.token_decimals, &swap.output_mint)?,
+        base_token_address,
+        quote_token_address,
+        base_amount,
+        quote_amount,
+        base_token_decimals,
+        quote_token_decimals,
         sequence: ((transaction.transaction_index as u64) << 32)
             | instruction.execution_ordinal as u64,
     })
@@ -585,23 +633,49 @@ mod tests {
 
     #[test]
     fn maps_pumpfun_swaps_to_bonding_curve_prices() {
-        let transaction = transaction(BTreeMap::from([
-            ("input-mint".to_owned(), 9),
-            ("output-mint".to_owned(), 6),
-        ]));
+        let transaction = transaction(BTreeMap::from([("meme-mint".to_owned(), 6)]));
         let instruction = instruction(pumpfun::PROGRAM_ID);
-
-        let swap = swap();
+        let swap = TokenSwap {
+            input_mint: "meme-mint".to_owned(),
+            input_amount: 123,
+            output_mint: WRAPPED_SOL_MINT.to_owned(),
+            output_amount: 456,
+            ..swap()
+        };
         let price = token_pair_price(&transaction, &instruction, &swap).unwrap();
 
         assert_eq!(
             price.liquidity_provider_kind,
             LiquidityProviderKind::BondingCurve
         );
-        assert_eq!(price.base_token_address, "input-mint");
-        assert_eq!(price.quote_token_address, "output-mint");
-        assert_eq!(price.base_token_decimals, 9);
-        assert_eq!(price.quote_token_decimals, 6);
+        assert_eq!(price.base_token_address, "meme-mint");
+        assert_eq!(price.quote_token_address, WRAPPED_SOL_MINT);
+        assert_eq!(price.base_amount, 123);
+        assert_eq!(price.quote_amount, 456);
+        assert_eq!(price.base_token_decimals, 6);
+        assert_eq!(price.quote_token_decimals, WRAPPED_SOL_DECIMALS);
+    }
+
+    #[test]
+    fn reverses_pumpfun_buys_to_use_wrapped_sol_as_quote() {
+        let transaction = transaction(BTreeMap::from([("meme-mint".to_owned(), 6)]));
+        let instruction = instruction(pumpfun::PROGRAM_ID);
+        let swap = TokenSwap {
+            input_mint: WRAPPED_SOL_MINT.to_owned(),
+            input_amount: 456,
+            output_mint: "meme-mint".to_owned(),
+            output_amount: 123,
+            ..swap()
+        };
+
+        let price = token_pair_price(&transaction, &instruction, &swap).unwrap();
+
+        assert_eq!(price.base_token_address, "meme-mint");
+        assert_eq!(price.quote_token_address, WRAPPED_SOL_MINT);
+        assert_eq!(price.base_amount, 123);
+        assert_eq!(price.quote_amount, 456);
+        assert_eq!(price.base_token_decimals, 6);
+        assert_eq!(price.quote_token_decimals, WRAPPED_SOL_DECIMALS);
     }
 
     #[test]
@@ -633,12 +707,43 @@ mod tests {
     #[test]
     fn rejects_swaps_without_token_decimals() {
         let transaction = transaction(BTreeMap::new());
-        let instruction = instruction(pumpfun::PROGRAM_ID);
+        let instruction = instruction(pumpswap::PROGRAM_ID);
 
         assert!(matches!(
             token_pair_price(&transaction, &instruction, &swap()),
             Err(SaverError::MissingTokenDecimals(mint)) if mint == "input-mint"
         ));
+    }
+
+    #[test]
+    fn rejects_pumpfun_swaps_without_wrapped_sol() {
+        let transaction = transaction(BTreeMap::from([
+            ("input-mint".to_owned(), 9),
+            ("output-mint".to_owned(), 6),
+        ]));
+        let instruction = instruction(pumpfun::PROGRAM_ID);
+
+        assert!(matches!(
+            token_pair_price(&transaction, &instruction, &swap()),
+            Err(SaverError::PumpfunSwapWithoutWrappedSol)
+        ));
+    }
+
+    #[test]
+    fn ignores_pumpfun_swaps_without_wrapped_sol() {
+        let mut instruction = instruction(pumpfun::PROGRAM_ID);
+        instruction.result = Ok(ParsedEvent::TokenSwap(swap()));
+        let events = BlockEvents {
+            transactions: vec![TransactionEvents {
+                instructions: vec![instruction],
+                ..transaction(BTreeMap::from([
+                    ("input-mint".to_owned(), 9),
+                    ("output-mint".to_owned(), 6),
+                ]))
+            }],
+        };
+
+        assert!(collect_token_pair_prices(&events).unwrap().is_empty());
     }
 
     #[test]
@@ -657,9 +762,9 @@ mod tests {
 
     #[test]
     fn keeps_all_prices_for_clickhouse_before_deduplicating_postgresql_prices() {
-        let mut first_instruction = instruction(pumpfun::PROGRAM_ID);
+        let mut first_instruction = instruction(pumpswap::PROGRAM_ID);
         first_instruction.result = Ok(ParsedEvent::TokenSwap(swap()));
-        let mut second_instruction = instruction(pumpfun::PROGRAM_ID);
+        let mut second_instruction = instruction(pumpswap::PROGRAM_ID);
         second_instruction.execution_ordinal = 1;
         let mut second_swap = swap();
         second_swap.input_amount = 789;
