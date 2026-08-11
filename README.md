@@ -72,7 +72,7 @@ DB_DISABLE_SSL=false
 
 Set `DB_DISABLE_SSL=false` to require a TLS connection using WebPKI root certificates. Set it to `true` only for a trusted local PostgreSQL instance.
 
-`saver` also writes every parsed swap to ClickHouse in a batch per block. Configure its HTTP endpoint and credentials:
+`saver` writes every parsed swap and the latest price for each liquidity provider to ClickHouse in batches per block. Configure its HTTP endpoint and credentials:
 
 ```dotenv
 CLICKHOUSE_URL=http://localhost:8123

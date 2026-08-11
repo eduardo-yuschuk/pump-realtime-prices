@@ -12,6 +12,21 @@ ENGINE = MergeTree
 PARTITION BY toYYYYMM(time)
 ORDER BY (liquidity_provider_address, time, sequence);
 
+CREATE TABLE IF NOT EXISTS token_pair_prices (
+    liquidity_provider_address String,
+    liquidity_provider_kind Enum8('amm' = 1, 'bonding_curve' = 2),
+    base_token_address String,
+    quote_token_address String,
+    base_amount UInt64,
+    quote_amount UInt64,
+    base_token_decimals UInt8,
+    quote_token_decimals UInt8,
+    price Decimal(38, 18),
+    updated_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY liquidity_provider_address;
+
 CREATE TABLE IF NOT EXISTS price_bars_1m (
     liquidity_provider_address String,
     liquidity_provider_kind Enum8('amm' = 1, 'bonding_curve' = 2),

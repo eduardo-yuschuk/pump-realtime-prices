@@ -296,13 +296,48 @@ impl Saver {
             .await
             .map_err(SaverError::Database)?;
 
-        self.save_real_time_prices(&prices).await?;
+        let time = current_time_millis()?;
+        self.save_latest_token_pair_prices(&latest_prices, time)
+            .await?;
+        self.save_real_time_prices(&prices, time).await?;
 
         Ok(prices.len())
     }
 
-    async fn save_real_time_prices(&self, prices: &[TokenPairPrice]) -> Result<(), SaverError> {
-        let time = current_time_millis()?;
+    async fn save_latest_token_pair_prices(
+        &self,
+        prices: &[TokenPairPrice],
+        updated_at: i64,
+    ) -> Result<(), SaverError> {
+        let mut insert = self
+            .clickhouse_client
+            .insert::<LatestTokenPairPriceRow<'_>>("token_pair_prices")
+            .await
+            .map_err(SaverError::ClickHouse)?;
+
+        for price in prices {
+            let row = LatestTokenPairPriceRow {
+                liquidity_provider_address: &price.liquidity_provider_address,
+                liquidity_provider_kind: price.liquidity_provider_kind,
+                base_token_address: &price.base_token_address,
+                quote_token_address: &price.quote_token_address,
+                base_amount: price.base_amount,
+                quote_amount: price.quote_amount,
+                base_token_decimals: price.base_token_decimals,
+                quote_token_decimals: price.quote_token_decimals,
+                price: normalized_price(price)?,
+                updated_at,
+            };
+            insert.write(&row).await.map_err(SaverError::ClickHouse)?;
+        }
+        insert.end().await.map_err(SaverError::ClickHouse)
+    }
+
+    async fn save_real_time_prices(
+        &self,
+        prices: &[TokenPairPrice],
+        time: i64,
+    ) -> Result<(), SaverError> {
         let mut insert = self
             .clickhouse_client
             .insert::<RealTimePriceRow<'_>>("real_time_prices")
@@ -365,6 +400,20 @@ struct RealTimePriceRow<'a> {
     volume: i128,
     time: i64,
     sequence: u64,
+}
+
+#[derive(Row, Serialize)]
+struct LatestTokenPairPriceRow<'a> {
+    liquidity_provider_address: &'a str,
+    liquidity_provider_kind: LiquidityProviderKind,
+    base_token_address: &'a str,
+    quote_token_address: &'a str,
+    base_amount: u64,
+    quote_amount: u64,
+    base_token_decimals: u8,
+    quote_token_decimals: u8,
+    price: i128,
+    updated_at: i64,
 }
 
 fn collect_token_pair_prices(events: &BlockEvents) -> Result<Vec<TokenPairPrice>, SaverError> {
