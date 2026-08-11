@@ -35,13 +35,14 @@
 - [x] Add tests for the visual transaction inspector covering argument validation, missing fixtures, protocol selection, and rendered parsed events.
 - [x] Implement the PumpSwap parser. It must return the applicable shared `ParsedEvent` variant, or `Ok(None)` when the instruction produces no modeled event.
 - [x] Add tests for all public PumpSwap parsing functions and their error handling.
-- [x] Add a PostgreSQL schema for storing the latest token pair price by AMM or bonding curve address.
+- [x] Organize PostgreSQL and ClickHouse schemas for latest token-pair prices and real-time one-minute bars.
 - [x] Create a standalone WebSocket indexer that subscribes to finalized full blocks, reconnects, parses them, and prints result summaries with parsing time.
 - [x] Add a root script to run the standalone indexer.
 - [x] Create a `saver` workspace library that persists parsed `TokenSwap` events as latest token pair prices in PostgreSQL.
 - [x] Enrich parser transaction output with token mint decimals from RPC token balances and integrate `saver` into the standalone indexer.
 - [x] Batch PostgreSQL token pair price upserts per block while preserving the last swap for each liquidity provider.
 - [x] Include PostgreSQL batch write duration in standalone indexer block summaries.
+- [x] Batch all parsed swap prices into ClickHouse alongside PostgreSQL latest-price upserts.
 
 ## Documentation
 
@@ -52,7 +53,7 @@
 - [x] Add an English `.env.example` documenting the strict comma-separated `PARSERS=pumpfun,pumpswap` configuration.
 - [x] Define Solana JSON-RPC and WebSocket endpoint variables in `.env.example`.
 - [x] Add externally contributed DEX and memecoin protocol landscape references for prioritizing future parser integrations.
-- [x] Document PostgreSQL environment configuration for token pair price persistence.
+- [x] Document PostgreSQL and ClickHouse environment configuration for price persistence.
 
 ## Repository Maintenance
 

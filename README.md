@@ -72,6 +72,15 @@ DB_DISABLE_SSL=false
 
 Set `DB_DISABLE_SSL=false` to require a TLS connection using WebPKI root certificates. Set it to `true` only for a trusted local PostgreSQL instance.
 
+`saver` also writes every parsed swap to ClickHouse in a batch per block. Configure its HTTP endpoint and credentials:
+
+```dotenv
+CLICKHOUSE_URL=http://localhost:8123
+CLICKHOUSE_USERNAME=
+CLICKHOUSE_DATABASE=default
+CLICKHOUSE_PASSWORD=
+```
+
 For every `TokenSwap`, `saver` stores the input mint and raw input amount as the base side, and the output mint and raw output amount as the quote side.
 
 ## Sample Data
