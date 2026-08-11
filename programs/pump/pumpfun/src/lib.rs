@@ -183,6 +183,8 @@ fn parse_trade_event(payload: &[u8]) -> ParseResult<TokenSwap> {
     Ok(TokenSwap {
         user: user.to_string(),
         pool: pool.to_string(),
+        base_mint: None,
+        quote_mint: None,
         input_mint,
         input_amount,
         output_mint,
@@ -324,6 +326,8 @@ mod tests {
             ParsedEvent::TokenSwap(TokenSwap {
                 user: "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s".to_owned(),
                 pool: "2ntct7fobbSv2rnMSccPXDxPsmuaRu4Zbykw8uvUcTmD".to_owned(),
+                base_mint: None,
+                quote_mint: None,
                 input_mint: WRAPPED_SOL_MINT.to_owned(),
                 input_amount: 81_566_824,
                 output_mint: "8NMMzUZ3sGdS1ZPUj1YGcJyHzRgxMHW9aHjqZkfbpump".to_owned(),
@@ -344,6 +348,8 @@ mod tests {
             ParsedEvent::TokenSwap(TokenSwap {
                 user: "8T4stzcuUcRTRX3aBFuTjXPw3FMxuk98ppUEAFwej9RT".to_owned(),
                 pool: "99rwCg3rNs3JnF6PGC2DYjdbAYsGSt9voCtLyc88VSUE".to_owned(),
+                base_mint: None,
+                quote_mint: None,
                 input_mint: "E49s67zcz2Zomc6c8Pk57eCNsAv7j6a86T3vACzFpump".to_owned(),
                 input_amount: 640_564_376_586,
                 output_mint: WRAPPED_SOL_MINT.to_owned(),

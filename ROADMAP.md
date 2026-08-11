@@ -42,7 +42,7 @@
 - [x] Enrich parser transaction output with token mint decimals from RPC token balances and integrate `saver` into the standalone indexer.
 - [x] Batch PostgreSQL token pair price upserts per block while preserving the last swap for each liquidity provider.
 - [x] Include PostgreSQL batch write duration in standalone indexer block summaries.
-- [x] Batch all parsed swap prices and the latest price per liquidity provider into ClickHouse alongside PostgreSQL latest-price upserts, canonicalizing valid Pump.fun bonding-curve pairs as meme token/WSOL and filtering invalid pairs.
+- [x] Batch all parsed swap prices and the latest price per liquidity provider into ClickHouse alongside PostgreSQL latest-price upserts, canonicalizing valid Pump.fun bonding-curve pairs as meme token/WSOL, filtering invalid pairs, and preserving PumpSwap parent base/quote mint order.
 
 ## Documentation
 

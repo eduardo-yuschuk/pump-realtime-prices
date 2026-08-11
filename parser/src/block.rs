@@ -178,6 +178,8 @@ mod tests {
             Ok(ParsedEvent::TokenSwap(TokenSwap {
                 user: "BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s".to_owned(),
                 pool: "2ntct7fobbSv2rnMSccPXDxPsmuaRu4Zbykw8uvUcTmD".to_owned(),
+                base_mint: None,
+                quote_mint: None,
                 input_mint: "So11111111111111111111111111111111111111112".to_owned(),
                 input_amount: 81_566_824,
                 output_mint: "8NMMzUZ3sGdS1ZPUj1YGcJyHzRgxMHW9aHjqZkfbpump".to_owned(),

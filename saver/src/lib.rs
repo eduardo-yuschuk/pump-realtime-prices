@@ -122,6 +122,8 @@ pub enum SaverError {
     ZeroBaseAmount,
     UnsupportedTokenSwapProgram(String),
     PumpfunSwapWithoutWrappedSol,
+    MissingPumpSwapPoolMints,
+    PumpSwapMintsDoNotMatchSwap,
     MissingTokenDecimals(String),
 }
 
@@ -158,6 +160,12 @@ impl fmt::Display for SaverError {
             }
             Self::PumpfunSwapWithoutWrappedSol => {
                 formatter.write_str("Pump.fun bonding curve swap does not include wrapped SOL")
+            }
+            Self::MissingPumpSwapPoolMints => {
+                formatter.write_str("PumpSwap swap does not include the parent pool mints")
+            }
+            Self::PumpSwapMintsDoNotMatchSwap => {
+                formatter.write_str("PumpSwap swap mints do not match the parent pool mints")
             }
             Self::MissingTokenDecimals(mint) => {
                 write!(
@@ -475,14 +483,36 @@ fn token_pair_price(
         base_token_decimals,
         quote_token_decimals,
     ) = match liquidity_provider_kind {
-        LiquidityProviderKind::Amm => (
-            swap.input_mint.clone(),
-            swap.output_mint.clone(),
-            swap.input_amount,
-            swap.output_amount,
-            token_decimals(&transaction.token_decimals, &swap.input_mint)?,
-            token_decimals(&transaction.token_decimals, &swap.output_mint)?,
-        ),
+        LiquidityProviderKind::Amm => {
+            let base_mint = swap
+                .base_mint
+                .as_deref()
+                .ok_or(SaverError::MissingPumpSwapPoolMints)?;
+            let quote_mint = swap
+                .quote_mint
+                .as_deref()
+                .ok_or(SaverError::MissingPumpSwapPoolMints)?;
+            let (base_amount, quote_amount) = match (
+                swap.input_mint.as_str() == base_mint,
+                swap.output_mint.as_str() == quote_mint,
+            ) {
+                (true, true) => (swap.input_amount, swap.output_amount),
+                (false, false)
+                    if swap.input_mint == quote_mint && swap.output_mint == base_mint =>
+                {
+                    (swap.output_amount, swap.input_amount)
+                }
+                _ => return Err(SaverError::PumpSwapMintsDoNotMatchSwap),
+            };
+            (
+                base_mint.to_owned(),
+                quote_mint.to_owned(),
+                base_amount,
+                quote_amount,
+                token_decimals(&transaction.token_decimals, base_mint)?,
+                token_decimals(&transaction.token_decimals, quote_mint)?,
+            )
+        }
         LiquidityProviderKind::BondingCurve => match (
             swap.input_mint == WRAPPED_SOL_MINT,
             swap.output_mint == WRAPPED_SOL_MINT,
@@ -610,6 +640,8 @@ mod tests {
         TokenSwap {
             user: "user".to_owned(),
             pool: "pool".to_owned(),
+            base_mint: Some("input-mint".to_owned()),
+            quote_mint: Some("output-mint".to_owned()),
             input_mint: "input-mint".to_owned(),
             input_amount: 123,
             output_mint: "output-mint".to_owned(),
@@ -680,18 +712,26 @@ mod tests {
 
     #[test]
     fn maps_pumpswap_swaps_to_amm_prices() {
-        let transaction = transaction(BTreeMap::from([
-            ("input-mint".to_owned(), 6),
-            ("output-mint".to_owned(), 9),
-        ]));
+        let transaction = transaction(BTreeMap::from([("meme-mint".to_owned(), 6)]));
         let instruction = instruction(pumpswap::PROGRAM_ID);
+        let swap = TokenSwap {
+            base_mint: Some(WRAPPED_SOL_MINT.to_owned()),
+            quote_mint: Some("meme-mint".to_owned()),
+            input_mint: "meme-mint".to_owned(),
+            input_amount: 2_548_261_813_582,
+            output_mint: WRAPPED_SOL_MINT.to_owned(),
+            output_amount: 2_003_600_987,
+            ..swap()
+        };
+        let price = token_pair_price(&transaction, &instruction, &swap).unwrap();
 
-        assert_eq!(
-            token_pair_price(&transaction, &instruction, &swap())
-                .unwrap()
-                .liquidity_provider_kind,
-            LiquidityProviderKind::Amm
-        );
+        assert_eq!(price.liquidity_provider_kind, LiquidityProviderKind::Amm);
+        assert_eq!(price.base_token_address, WRAPPED_SOL_MINT);
+        assert_eq!(price.quote_token_address, "meme-mint");
+        assert_eq!(price.base_amount, 2_003_600_987);
+        assert_eq!(price.quote_amount, 2_548_261_813_582);
+        assert_eq!(price.base_token_decimals, WRAPPED_SOL_DECIMALS);
+        assert_eq!(price.quote_token_decimals, 6);
     }
 
     #[test]

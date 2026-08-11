@@ -130,6 +130,10 @@ pub struct TokenSwap {
     pub user: String,
     /// Pool or market address through which the swap was executed.
     pub pool: String,
+    /// Base mint configured by the pool, when the protocol exposes one.
+    pub base_mint: Option<String>,
+    /// Quote mint configured by the pool, when the protocol exposes one.
+    pub quote_mint: Option<String>,
     /// Mint address of the token supplied by the user.
     pub input_mint: String,
     /// Amount of the input token supplied, in base units.
@@ -258,6 +262,8 @@ mod tests {
                     Ok(Some(ParsedEvent::TokenSwap(TokenSwap {
                         user: instruction.account(0)?.to_owned(),
                         pool: instruction.account(1)?.to_owned(),
+                        base_mint: None,
+                        quote_mint: None,
                         input_mint: instruction.account(2)?.to_owned(),
                         input_amount,
                         output_mint: instruction.account(3)?.to_owned(),
@@ -327,6 +333,8 @@ mod tests {
             Some(ParsedEvent::TokenSwap(TokenSwap {
                 user: "user".to_owned(),
                 pool: "pool".to_owned(),
+                base_mint: None,
+                quote_mint: None,
                 input_mint: "input-mint".to_owned(),
                 input_amount: 42,
                 output_mint: "output-mint".to_owned(),

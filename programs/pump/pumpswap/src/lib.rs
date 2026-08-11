@@ -179,6 +179,8 @@ fn parse_buy_event(payload: &[u8], parent: InstructionContext<'_>) -> ParseResul
     Ok(TokenSwap {
         user: user.to_string(),
         pool: pool.to_string(),
+        base_mint: Some(base_mint.clone()),
+        quote_mint: Some(quote_mint.clone()),
         input_mint: quote_mint,
         input_amount,
         output_mint: base_mint,
@@ -234,6 +236,8 @@ fn parse_sell_event(payload: &[u8], parent: InstructionContext<'_>) -> ParseResu
     Ok(TokenSwap {
         user: user.to_string(),
         pool: pool.to_string(),
+        base_mint: Some(base_mint.clone()),
+        quote_mint: Some(quote_mint.clone()),
         input_mint: base_mint,
         input_amount: base_amount_in,
         output_mint: quote_mint,
@@ -521,6 +525,8 @@ mod tests {
             Some(ParsedEvent::TokenSwap(TokenSwap {
                 user: "8nLd2NbuoGnj4YKKjwRo7Xkhw55V2dhhR1RQqWo7fYeA".to_owned(),
                 pool: POOL.to_owned(),
+                base_mint: Some(BASE_MINT.to_owned()),
+                quote_mint: Some(QUOTE_MINT.to_owned()),
                 input_mint: QUOTE_MINT.to_owned(),
                 input_amount: 8_411_309_631_679,
                 output_mint: BASE_MINT.to_owned(),
@@ -542,6 +548,8 @@ mod tests {
             Some(ParsedEvent::TokenSwap(TokenSwap {
                 user: "4iPmppqTTkEaokWw9iKCBU8YaN55gVfnSCkkqfa4aQFf".to_owned(),
                 pool: POOL.to_owned(),
+                base_mint: Some(BASE_MINT.to_owned()),
+                quote_mint: Some(QUOTE_MINT.to_owned()),
                 input_mint: BASE_MINT.to_owned(),
                 input_amount: 12_334_640_759,
                 output_mint: QUOTE_MINT.to_owned(),
@@ -564,6 +572,8 @@ mod tests {
             Some(ParsedEvent::TokenSwap(TokenSwap {
                 user: "JBAq4zbH46ApCAxte6hmXGdk3aH5ZXaGCjUqh2LyYKck".to_owned(),
                 pool: "BimKw2yfEvAmwYFTy6jGXVsT7A8aCuquxjqJW5i9jv7K".to_owned(),
+                base_mint: Some("HFJXAF8yKgPD43xsyb2cd433hq9nb7jkVbeGji3spump".to_owned()),
+                quote_mint: Some(BASE_MINT.to_owned()),
                 input_mint: BASE_MINT.to_owned(),
                 input_amount: 23_000_000,
                 output_mint: "HFJXAF8yKgPD43xsyb2cd433hq9nb7jkVbeGji3spump".to_owned(),
