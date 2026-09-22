@@ -1,8 +1,13 @@
 //! PumpSwap program integration.
 //!
-//! The parser is based on the official PumpSwap IDL at commit
-//! `2c22246b670812e2392e5f94b9543f500d6c9e15`:
-//! <https://github.com/pump-fun/pump-public-docs/blob/2c22246b670812e2392e5f94b9543f500d6c9e15/idl/pump_amm.json>.
+//! The parser is based on the IDL the program publishes on chain, stored as
+//! `new_idl.json` next to this crate and read on 2026-09-22. That IDL is behind
+//! the deployed program: observed payloads carry 41 undeclared trailing bytes.
+//! See `doc/protocol_parsers.md`.
+//!
+//! Events are decoded up to the last field consumed here and any trailing
+//! bytes are ignored, so fields appended by a protocol upgrade do not stop the
+//! swap from being parsed.
 //!
 //! PumpSwap emits Anchor events through self-CPI instructions. A buy or sell
 //! event is only authoritative when it matches its immediate PumpSwap parent,
@@ -10,8 +15,10 @@
 
 use std::str;
 
+use borsh::BorshDeserialize;
 use common::{
-    InstructionContext, InstructionParser, ParseError, ParseResult, ParsedEvent, TokenSwap,
+    decode_event_prefix, InstructionContext, InstructionParser, ParseError, ParseResult,
+    ParsedEvent, TokenSwap,
 };
 use solana_pubkey::Pubkey;
 
@@ -106,53 +113,77 @@ fn validate_parent_program(parent: InstructionContext<'_>) -> ParseResult<()> {
     }
 }
 
+/// Leading `BuyEvent` fields, up to the last one this parser consumes.
+///
+/// Everything the program appends after `ix_name` is deliberately left out:
+/// the payload observed on chain already carries fields the published IDL does
+/// not declare, and the protocol keeps adding more.
+#[derive(BorshDeserialize)]
+#[allow(dead_code)]
+struct BuyEventPrefix {
+    timestamp: i64,
+    base_amount_out: u64,
+    max_quote_amount_in: u64,
+    user_base_token_reserves: u64,
+    user_quote_token_reserves: u64,
+    pool_base_token_reserves: u64,
+    pool_quote_token_reserves: u64,
+    quote_amount_in: u64,
+    lp_fee_basis_points: u64,
+    lp_fee: u64,
+    protocol_fee_basis_points: u64,
+    protocol_fee: u64,
+    quote_amount_in_with_lp_fee: u64,
+    user_quote_amount_in: u64,
+    pool: Pubkey,
+    user: Pubkey,
+    user_base_token_account: Pubkey,
+    user_quote_token_account: Pubkey,
+    protocol_fee_recipient: Pubkey,
+    protocol_fee_recipient_token_account: Pubkey,
+    coin_creator: Pubkey,
+    coin_creator_fee_basis_points: u64,
+    coin_creator_fee: u64,
+    track_volume: bool,
+    total_unclaimed_tokens: u64,
+    total_claimed_tokens: u64,
+    current_sol_volume: u64,
+    last_update_timestamp: i64,
+    min_base_amount_out: u64,
+    ix_name: String,
+}
+
+/// Leading `SellEvent` fields, up to the last one this parser consumes.
+#[derive(BorshDeserialize)]
+#[allow(dead_code)]
+struct SellEventPrefix {
+    timestamp: i64,
+    base_amount_in: u64,
+    min_quote_amount_out: u64,
+    user_base_token_reserves: u64,
+    user_quote_token_reserves: u64,
+    pool_base_token_reserves: u64,
+    pool_quote_token_reserves: u64,
+    quote_amount_out: u64,
+    lp_fee_basis_points: u64,
+    lp_fee: u64,
+    protocol_fee_basis_points: u64,
+    protocol_fee: u64,
+    quote_amount_out_without_lp_fee: u64,
+    user_quote_amount_out: u64,
+    pool: Pubkey,
+    user: Pubkey,
+}
+
 fn parse_buy_event(payload: &[u8], parent: InstructionContext<'_>) -> ParseResult<TokenSwap> {
-    let mut decoder = Decoder::new(payload);
-    decoder.read_i64("BuyEvent.timestamp")?;
-    let base_amount_out = decoder.read_u64("BuyEvent.base_amount_out")?;
-    decoder.read_u64("BuyEvent.max_quote_amount_in")?;
-    decoder.read_u64("BuyEvent.user_base_token_reserves")?;
-    decoder.read_u64("BuyEvent.user_quote_token_reserves")?;
-    decoder.read_u64("BuyEvent.pool_base_token_reserves")?;
-    decoder.read_u64("BuyEvent.pool_quote_token_reserves")?;
-    let quote_amount_in = decoder.read_u64("BuyEvent.quote_amount_in")?;
-    decoder.read_u64("BuyEvent.lp_fee_basis_points")?;
-    decoder.read_u64("BuyEvent.lp_fee")?;
-    decoder.read_u64("BuyEvent.protocol_fee_basis_points")?;
-    decoder.read_u64("BuyEvent.protocol_fee")?;
-    decoder.read_u64("BuyEvent.quote_amount_in_with_lp_fee")?;
-    let user_quote_amount_in = decoder.read_u64("BuyEvent.user_quote_amount_in")?;
-    let pool = decoder.read_pubkey("BuyEvent.pool")?;
-    let user = decoder.read_pubkey("BuyEvent.user")?;
-    decoder.read_pubkey("BuyEvent.user_base_token_account")?;
-    decoder.read_pubkey("BuyEvent.user_quote_token_account")?;
-    decoder.read_pubkey("BuyEvent.protocol_fee_recipient")?;
-    decoder.read_pubkey("BuyEvent.protocol_fee_recipient_token_account")?;
-    decoder.read_pubkey("BuyEvent.coin_creator")?;
-    decoder.read_u64("BuyEvent.coin_creator_fee_basis_points")?;
-    decoder.read_u64("BuyEvent.coin_creator_fee")?;
-    decoder.read_bool("BuyEvent.track_volume")?;
-    decoder.read_u64("BuyEvent.total_unclaimed_tokens")?;
-    decoder.read_u64("BuyEvent.total_claimed_tokens")?;
-    decoder.read_u64("BuyEvent.current_sol_volume")?;
-    decoder.read_i64("BuyEvent.last_update_timestamp")?;
-    decoder.read_u64("BuyEvent.min_base_amount_out")?;
-    let ix_name = decoder.read_string("BuyEvent.ix_name")?;
-    decoder.read_u64("BuyEvent.cashback_fee_basis_points")?;
-    decoder.read_u64("BuyEvent.cashback")?;
-    decoder.read_u64("BuyEvent.buyback_fee_basis_points")?;
-    decoder.read_u64("BuyEvent.buyback_fee")?;
-    decoder.read_i128("BuyEvent.virtual_quote_reserves")?;
-    decoder.read_bool("BuyEvent.can_boost")?;
-    decoder.read_u64("BuyEvent.base_supply")?;
-    decoder.finish("BuyEvent")?;
+    let event: BuyEventPrefix = decode_event_prefix(payload, "BuyEvent")?;
 
     let input_amount = match parent_discriminator(parent)? {
         value if value == BUY_DISCRIMINATOR => {
             validate_parent_layout(parent, BUY_PARENT_DATA_LEN, BUY_PARENT_ACCOUNT_COUNT)?;
-            validate_ix_name(&ix_name, "buy")?;
-            validate_parent_amount(parent, base_amount_out, "BuyEvent.base_amount_out")?;
-            user_quote_amount_in
+            validate_ix_name(&event.ix_name, "buy")?;
+            validate_parent_amount(parent, event.base_amount_out, "BuyEvent.base_amount_out")?;
+            event.user_quote_amount_in
         }
         value if value == BUY_EXACT_QUOTE_IN_DISCRIMINATOR => {
             // A successful mainnet instruction at slot 438131164 omits the
@@ -162,9 +193,9 @@ fn parse_buy_event(payload: &[u8], parent: InstructionContext<'_>) -> ParseResul
                 BUY_EXACT_QUOTE_IN_PARENT_DATA_LEN,
                 BUY_PARENT_ACCOUNT_COUNT,
             )?;
-            validate_ix_name(&ix_name, "buy_exact_quote_in")?;
-            validate_parent_amount(parent, quote_amount_in, "BuyEvent.quote_amount_in")?;
-            quote_amount_in
+            validate_ix_name(&event.ix_name, "buy_exact_quote_in")?;
+            validate_parent_amount(parent, event.quote_amount_in, "BuyEvent.quote_amount_in")?;
+            event.quote_amount_in
         }
         _ => {
             return Err(ParseError::InvalidInstructionData(
@@ -172,55 +203,24 @@ fn parse_buy_event(payload: &[u8], parent: InstructionContext<'_>) -> ParseResul
             ));
         }
     };
-    validate_parent_accounts(pool, user, parent, "BuyEvent")?;
+    validate_parent_accounts(event.pool, event.user, parent, "BuyEvent")?;
     let base_mint = parent_mint(parent, BASE_MINT_ACCOUNT_INDEX, "base_mint")?;
     let quote_mint = parent_mint(parent, QUOTE_MINT_ACCOUNT_INDEX, "quote_mint")?;
 
     Ok(TokenSwap {
-        user: user.to_string(),
-        pool: pool.to_string(),
+        user: event.user.to_string(),
+        pool: event.pool.to_string(),
         base_mint: Some(base_mint.clone()),
         quote_mint: Some(quote_mint.clone()),
         input_mint: quote_mint,
         input_amount,
         output_mint: base_mint,
-        output_amount: base_amount_out,
+        output_amount: event.base_amount_out,
     })
 }
 
 fn parse_sell_event(payload: &[u8], parent: InstructionContext<'_>) -> ParseResult<TokenSwap> {
-    let mut decoder = Decoder::new(payload);
-    decoder.read_i64("SellEvent.timestamp")?;
-    let base_amount_in = decoder.read_u64("SellEvent.base_amount_in")?;
-    decoder.read_u64("SellEvent.min_quote_amount_out")?;
-    decoder.read_u64("SellEvent.user_base_token_reserves")?;
-    decoder.read_u64("SellEvent.user_quote_token_reserves")?;
-    decoder.read_u64("SellEvent.pool_base_token_reserves")?;
-    decoder.read_u64("SellEvent.pool_quote_token_reserves")?;
-    decoder.read_u64("SellEvent.quote_amount_out")?;
-    decoder.read_u64("SellEvent.lp_fee_basis_points")?;
-    decoder.read_u64("SellEvent.lp_fee")?;
-    decoder.read_u64("SellEvent.protocol_fee_basis_points")?;
-    decoder.read_u64("SellEvent.protocol_fee")?;
-    decoder.read_u64("SellEvent.quote_amount_out_without_lp_fee")?;
-    let user_quote_amount_out = decoder.read_u64("SellEvent.user_quote_amount_out")?;
-    let pool = decoder.read_pubkey("SellEvent.pool")?;
-    let user = decoder.read_pubkey("SellEvent.user")?;
-    decoder.read_pubkey("SellEvent.user_base_token_account")?;
-    decoder.read_pubkey("SellEvent.user_quote_token_account")?;
-    decoder.read_pubkey("SellEvent.protocol_fee_recipient")?;
-    decoder.read_pubkey("SellEvent.protocol_fee_recipient_token_account")?;
-    decoder.read_pubkey("SellEvent.coin_creator")?;
-    decoder.read_u64("SellEvent.coin_creator_fee_basis_points")?;
-    decoder.read_u64("SellEvent.coin_creator_fee")?;
-    decoder.read_u64("SellEvent.cashback_fee_basis_points")?;
-    decoder.read_u64("SellEvent.cashback")?;
-    decoder.read_u64("SellEvent.buyback_fee_basis_points")?;
-    decoder.read_u64("SellEvent.buyback_fee")?;
-    decoder.read_i128("SellEvent.virtual_quote_reserves")?;
-    decoder.read_bool("SellEvent.can_boost")?;
-    decoder.read_u64("SellEvent.base_supply")?;
-    decoder.finish("SellEvent")?;
+    let event: SellEventPrefix = decode_event_prefix(payload, "SellEvent")?;
 
     if parent_discriminator(parent)? != SELL_DISCRIMINATOR {
         return Err(ParseError::InvalidInstructionData(
@@ -228,20 +228,20 @@ fn parse_sell_event(payload: &[u8], parent: InstructionContext<'_>) -> ParseResu
         ));
     }
     validate_parent_layout(parent, SELL_PARENT_DATA_LEN, SELL_PARENT_ACCOUNT_COUNT)?;
-    validate_parent_amount(parent, base_amount_in, "SellEvent.base_amount_in")?;
-    validate_parent_accounts(pool, user, parent, "SellEvent")?;
+    validate_parent_amount(parent, event.base_amount_in, "SellEvent.base_amount_in")?;
+    validate_parent_accounts(event.pool, event.user, parent, "SellEvent")?;
     let base_mint = parent_mint(parent, BASE_MINT_ACCOUNT_INDEX, "base_mint")?;
     let quote_mint = parent_mint(parent, QUOTE_MINT_ACCOUNT_INDEX, "quote_mint")?;
 
     Ok(TokenSwap {
-        user: user.to_string(),
-        pool: pool.to_string(),
+        user: event.user.to_string(),
+        pool: event.pool.to_string(),
         base_mint: Some(base_mint.clone()),
         quote_mint: Some(quote_mint.clone()),
         input_mint: base_mint,
-        input_amount: base_amount_in,
+        input_amount: event.base_amount_in,
         output_mint: quote_mint,
-        output_amount: user_quote_amount_out,
+        output_amount: event.user_quote_amount_out,
     })
 }
 
@@ -325,87 +325,6 @@ fn validate_ix_name(actual: &str, expected: &str) -> ParseResult<()> {
         Err(ParseError::InvalidInstructionData(format!(
             "BuyEvent.ix_name is {actual:?}, expected {expected:?} for its parent instruction"
         )))
-    }
-}
-
-struct Decoder<'a> {
-    data: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> Decoder<'a> {
-    const fn new(data: &'a [u8]) -> Self {
-        Self { data, offset: 0 }
-    }
-
-    fn read_bytes(&mut self, length: usize, field: &str) -> ParseResult<&'a [u8]> {
-        let end = self.offset.checked_add(length).ok_or_else(|| {
-            ParseError::InvalidInstructionData(format!("{field} length overflows"))
-        })?;
-        let bytes = self
-            .data
-            .get(self.offset..end)
-            .ok_or(ParseError::DataTooShort {
-                expected_at_least: EVENT_HEADER_LEN.saturating_add(end),
-                actual: EVENT_HEADER_LEN.saturating_add(self.data.len()),
-            })?;
-        self.offset = end;
-        Ok(bytes)
-    }
-
-    fn read_array<const LENGTH: usize>(&mut self, field: &str) -> ParseResult<[u8; LENGTH]> {
-        self.read_bytes(LENGTH, field)?
-            .try_into()
-            .map_err(|_| ParseError::InvalidInstructionData(format!("invalid {field} length")))
-    }
-
-    fn read_u32(&mut self, field: &str) -> ParseResult<u32> {
-        Ok(u32::from_le_bytes(self.read_array(field)?))
-    }
-
-    fn read_u64(&mut self, field: &str) -> ParseResult<u64> {
-        Ok(u64::from_le_bytes(self.read_array(field)?))
-    }
-
-    fn read_i64(&mut self, field: &str) -> ParseResult<i64> {
-        Ok(i64::from_le_bytes(self.read_array(field)?))
-    }
-
-    fn read_i128(&mut self, field: &str) -> ParseResult<i128> {
-        Ok(i128::from_le_bytes(self.read_array(field)?))
-    }
-
-    fn read_bool(&mut self, field: &str) -> ParseResult<bool> {
-        match self.read_bytes(1, field)?[0] {
-            0 => Ok(false),
-            1 => Ok(true),
-            value => Err(ParseError::InvalidInstructionData(format!(
-                "{field} contains invalid bool value {value}"
-            ))),
-        }
-    }
-
-    fn read_pubkey(&mut self, field: &str) -> ParseResult<Pubkey> {
-        Ok(Pubkey::new_from_array(self.read_array(field)?))
-    }
-
-    fn read_string(&mut self, field: &str) -> ParseResult<String> {
-        let length = self.read_u32(&format!("{field}.length"))? as usize;
-        let bytes = self.read_bytes(length, field)?;
-        str::from_utf8(bytes).map(str::to_owned).map_err(|error| {
-            ParseError::InvalidInstructionData(format!("{field} is not valid UTF-8: {error}"))
-        })
-    }
-
-    fn finish(&self, event: &str) -> ParseResult<()> {
-        if self.offset == self.data.len() {
-            Ok(())
-        } else {
-            Err(ParseError::InvalidInstructionData(format!(
-                "{event} contains {} unexpected trailing bytes",
-                self.data.len() - self.offset
-            )))
-        }
     }
 }
 
@@ -829,7 +748,12 @@ mod tests {
             )),
             load_fixture(include_str!("../tests/fixtures/sell_mainnet.json")),
         ] {
-            for length in EVENT_HEADER_LEN..fixture.event_data.len() {
+            // Only truncations that cut into the modeled prefix are
+            // detectable: bytes past it are ignored on purpose, so a payload
+            // cut after the prefix is indistinguishable from a shorter
+            // protocol version.
+            let prefix_len = EVENT_HEADER_LEN + modeled_prefix_len(&fixture.event_data);
+            for length in EVENT_HEADER_LEN..prefix_len {
                 let result = parse_parts(
                     &fixture.event_program_id,
                     &fixture.event_accounts,
@@ -839,7 +763,7 @@ mod tests {
                     &fixture.parent_data,
                 );
                 assert!(
-                    matches!(result, Err(ParseError::DataTooShort { .. })),
+                    result.is_err(),
                     "length {length} unexpectedly produced {result:?}"
                 );
             }
@@ -864,43 +788,76 @@ mod tests {
     fn rejects_invalid_borsh_booleans() {
         let mut buy = load_fixture(include_str!("../tests/fixtures/buy_mainnet.json"));
         buy.event_data[BUY_TRACK_VOLUME_OFFSET] = 2;
-        assert_invalid(
-            parse_fixture(&buy),
-            "BuyEvent.track_volume contains invalid bool",
-        );
-
-        let mut sell = load_fixture(include_str!("../tests/fixtures/sell_mainnet.json"));
-        let can_boost_offset = sell.event_data.len() - 9;
-        sell.event_data[can_boost_offset] = 3;
-        assert_invalid(
-            parse_fixture(&sell),
-            "SellEvent.can_boost contains invalid bool",
-        );
+        assert_invalid(parse_fixture(&buy), "Invalid bool representation");
     }
 
     #[test]
     fn rejects_invalid_borsh_strings() {
         let mut invalid_utf8 = load_fixture(include_str!("../tests/fixtures/buy_mainnet.json"));
         replace_buy_ix_name(&mut invalid_utf8.event_data, &[0xff]);
-        assert_invalid(parse_fixture(&invalid_utf8), "not valid UTF-8");
+        assert_invalid(parse_fixture(&invalid_utf8), "invalid utf-8 sequence");
 
         let mut invalid_length = load_fixture(include_str!("../tests/fixtures/buy_mainnet.json"));
         invalid_length.event_data[BUY_IX_NAME_LENGTH_OFFSET..BUY_IX_NAME_LENGTH_OFFSET + 4]
             .copy_from_slice(&u32::MAX.to_le_bytes());
-        assert!(matches!(
-            parse_fixture(&invalid_length),
-            Err(ParseError::DataTooShort { .. })
-        ));
+        assert_invalid(parse_fixture(&invalid_length), "Unexpected length of input");
     }
 
     #[test]
-    fn rejects_unexpected_trailing_bytes() {
-        for mut fixture in [
+    fn parses_real_mainnet_events_with_holder_reward_fields() {
+        // Captured after the protocol appended `holder_rewards_bps` and
+        // `holder_rewards`, which the published IDL does not declare.
+        let buy = load_fixture(include_str!(
+            "../tests/fixtures/buy_exact_quote_in_holder_rewards_mainnet.json"
+        ));
+        assert_eq!(buy.metadata["slot"], 449_427_600);
+
+        let swap = parse_fixture(&buy).unwrap().unwrap();
+        let ParsedEvent::TokenSwap(swap) = swap else {
+            panic!("expected a token swap");
+        };
+        assert_eq!(swap.pool, "2uF4Xh61rDwxnG9woyxsVQP7zuA6kLFpb3NvnRQeoiSd");
+        assert_eq!(swap.user, "1XraKHzVSjixEhzNph2aEdXX4sxJ6iYRWVRfCFjzNoP");
+        assert_eq!(swap.output_amount, 7_844_434_277);
+
+        let sell = load_fixture(include_str!(
+            "../tests/fixtures/sell_holder_rewards_mainnet.json"
+        ));
+        let swap = parse_fixture(&sell).unwrap().unwrap();
+        let ParsedEvent::TokenSwap(swap) = swap else {
+            panic!("expected a token swap");
+        };
+        assert_eq!(swap.pool, "2iUGkVrpsw3b39pNWRPLhyjzMp4vG9PCj8pKyUnoXpgA");
+        assert_eq!(swap.user, "5Q7sU7RaR6XNcztFRzDgyDRod2CPmiuq8apJp6DpjsUM");
+    }
+
+    #[test]
+    fn parses_events_carrying_fields_appended_by_protocol_upgrades() {
+        // Both programs appended `holder_rewards_bps` and `holder_rewards`
+        // after these fixtures were captured. Fields added past the modeled
+        // prefix must not stop the swap from being parsed.
+        for fixture in [
             load_fixture(include_str!("../tests/fixtures/buy_mainnet.json")),
             load_fixture(include_str!("../tests/fixtures/sell_mainnet.json")),
         ] {
-            fixture.event_data.push(0);
-            assert_invalid(parse_fixture(&fixture), "1 unexpected trailing bytes");
+            let expected = parse_fixture(&fixture);
+            let mut upgraded = fixture;
+            upgraded.event_data.extend_from_slice(&[0; 16]);
+
+            assert_eq!(parse_fixture(&upgraded), expected);
+            assert!(matches!(expected, Ok(Some(ParsedEvent::TokenSwap(_)))));
         }
+    }
+
+    /// Bytes consumed by the prefix this parser models for a real event payload.
+    fn modeled_prefix_len(event_data: &[u8]) -> usize {
+        let payload = &event_data[EVENT_HEADER_LEN..];
+        let mut remaining = payload;
+        if event_data[EVENT_IX_TAG.len()..EVENT_HEADER_LEN] == BUY_EVENT_DISCRIMINATOR {
+            BuyEventPrefix::deserialize(&mut remaining).expect("fixture must decode");
+        } else {
+            SellEventPrefix::deserialize(&mut remaining).expect("fixture must decode");
+        }
+        payload.len() - remaining.len()
     }
 }

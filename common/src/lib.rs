@@ -2,6 +2,8 @@
 
 use std::{error::Error, fmt};
 
+pub use borsh::BorshDeserialize;
+
 /// A borrowed, source-independent view of a Solana instruction.
 ///
 /// Block traversal and encoding concerns belong outside protocol parsers. Before
@@ -224,6 +226,27 @@ impl Error for ParseError {}
 
 /// Result type shared by all instruction parsers.
 pub type ParseResult<T> = Result<T, ParseError>;
+
+/// Deserializes the leading fields of an Anchor event payload with Borsh.
+///
+/// Anchor events are extended by appending fields, so protocols regularly grow
+/// their payloads without changing the meaning of existing ones. Parsers
+/// therefore model only the prefix they consume and this function deliberately
+/// ignores any bytes left after it: an upgrade that appends fields must not
+/// stop the indexer from reading the values it already understands.
+///
+/// A payload shorter than the modeled prefix is still an error, and parsers are
+/// expected to cross-check decoded values against the surrounding instruction
+/// so a reordered layout cannot pass unnoticed.
+pub fn decode_event_prefix<T: borsh::BorshDeserialize>(
+    payload: &[u8],
+    event: &'static str,
+) -> ParseResult<T> {
+    let mut remaining = payload;
+    T::deserialize(&mut remaining).map_err(|error| {
+        ParseError::InvalidInstructionData(format!("{event} is not a valid payload: {error}"))
+    })
+}
 
 #[cfg(test)]
 mod tests {

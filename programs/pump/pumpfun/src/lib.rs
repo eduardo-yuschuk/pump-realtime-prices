@@ -1,8 +1,12 @@
 //! Pump.fun program integration.
 //!
-//! The parser is based on the official Pump.fun IDL at commit
-//! `9c82f61cb711b044a17f770ab8ce9f9bdf78f333`:
-//! <https://github.com/pump-fun/pump-public-docs/blob/9c82f61cb711b044a17f770ab8ce9f9bdf78f333/idl/pump.json>.
+//! The parser is based on the IDL the program publishes on chain, stored as
+//! `new_idl.json` next to this crate and read on 2026-09-22. See
+//! `doc/protocol_parsers.md` for its provenance.
+//!
+//! Events are decoded up to the last field consumed here and any trailing
+//! bytes are ignored, so fields appended by a protocol upgrade do not stop the
+//! swap from being parsed.
 //!
 //! Pump.fun emits Anchor events through self-CPI instructions. This parser only
 //! emits storage events from those self-CPIs: outer create and trade
@@ -13,9 +17,10 @@
 
 use std::str;
 
+use borsh::BorshDeserialize;
 use common::{
-    InstructionContext, InstructionParser, ParseError, ParseResult, ParsedEvent, TokenDiscovery,
-    TokenSwap,
+    decode_event_prefix, InstructionContext, InstructionParser, ParseError, ParseResult,
+    ParsedEvent, TokenDiscovery, TokenSwap,
 };
 use solana_pubkey::Pubkey;
 
@@ -75,113 +80,131 @@ impl InstructionParser for PumpFunParser {
     }
 }
 
+/// One entry of the `TradeEvent.shareholders` collection.
+#[derive(BorshDeserialize)]
+#[allow(dead_code)]
+struct Shareholder {
+    address: Pubkey,
+    share_bps: u16,
+}
+
+/// Leading `CreateEvent` fields, up to the last one this parser consumes.
+///
+/// The program keeps appending fields, so anything after `creator` is
+/// deliberately left unmodeled.
+#[derive(BorshDeserialize)]
+#[allow(dead_code)]
+struct CreateEventPrefix {
+    name: String,
+    symbol: String,
+    uri: String,
+    mint: Pubkey,
+    bonding_curve: Pubkey,
+    user: Pubkey,
+    creator: Pubkey,
+}
+
+/// Leading `TradeEvent` fields, up to the last one this parser consumes.
+///
+/// `quote_mint` and `quote_amount` sit after the variable-length
+/// `shareholders` collection, so the prefix has to span it.
+#[derive(BorshDeserialize)]
+#[allow(dead_code)]
+struct TradeEventPrefix {
+    mint: Pubkey,
+    sol_amount: u64,
+    token_amount: u64,
+    is_buy: bool,
+    user: Pubkey,
+    timestamp: i64,
+    virtual_sol_reserves: u64,
+    virtual_token_reserves: u64,
+    real_sol_reserves: u64,
+    real_token_reserves: u64,
+    fee_recipient: Pubkey,
+    fee_basis_points: u64,
+    fee: u64,
+    creator: Pubkey,
+    creator_fee_basis_points: u64,
+    creator_fee: u64,
+    track_volume: bool,
+    total_unclaimed_tokens: u64,
+    total_claimed_tokens: u64,
+    current_sol_volume: u64,
+    last_update_timestamp: i64,
+    ix_name: String,
+    mayhem_mode: bool,
+    cashback_fee_basis_points: u64,
+    cashback: u64,
+    buyback_fee_basis_points: u64,
+    // The buyback fee is a portion of `fee`, not an additional user charge.
+    buyback_fee: u64,
+    shareholders: Vec<Shareholder>,
+    quote_mint: Pubkey,
+    quote_amount: u64,
+}
+
 fn parse_create_event(payload: &[u8]) -> ParseResult<TokenDiscovery> {
-    let mut decoder = Decoder::new(payload);
-    let name = decoder.read_string("CreateEvent.name")?;
-    let symbol = decoder.read_string("CreateEvent.symbol")?;
-    let uri = decoder.read_string("CreateEvent.uri")?;
-    let mint = decoder.read_pubkey("CreateEvent.mint")?;
-    decoder.read_pubkey("CreateEvent.bonding_curve")?;
-    decoder.read_pubkey("CreateEvent.user")?;
-    let creator = decoder.read_pubkey("CreateEvent.creator")?;
-    decoder.read_i64("CreateEvent.timestamp")?;
-    decoder.read_u64("CreateEvent.virtual_token_reserves")?;
-    decoder.read_u64("CreateEvent.virtual_sol_reserves")?;
-    decoder.read_u64("CreateEvent.real_token_reserves")?;
-    decoder.read_u64("CreateEvent.token_total_supply")?;
-    decoder.read_pubkey("CreateEvent.token_program")?;
-    decoder.read_bool("CreateEvent.is_mayhem_mode")?;
-    decoder.read_bool("CreateEvent.is_cashback_enabled")?;
-    decoder.read_pubkey("CreateEvent.quote_mint")?;
-    decoder.read_u64("CreateEvent.virtual_quote_reserves")?;
-    decoder.finish("CreateEvent")?;
+    let event: CreateEventPrefix = decode_event_prefix(payload, "CreateEvent")?;
 
     Ok(TokenDiscovery {
-        mint: mint.to_string(),
-        creator: creator.to_string(),
-        name,
-        symbol,
-        uri,
+        mint: event.mint.to_string(),
+        creator: event.creator.to_string(),
+        name: event.name,
+        symbol: event.symbol,
+        uri: event.uri,
     })
 }
 
 fn parse_trade_event(payload: &[u8]) -> ParseResult<TokenSwap> {
-    let mut decoder = Decoder::new(payload);
-    let mint = decoder.read_pubkey("TradeEvent.mint")?;
-    decoder.read_u64("TradeEvent.sol_amount")?;
-    let token_amount = decoder.read_u64("TradeEvent.token_amount")?;
-    let is_buy = decoder.read_bool("TradeEvent.is_buy")?;
-    let user = decoder.read_pubkey("TradeEvent.user")?;
-    decoder.read_i64("TradeEvent.timestamp")?;
-    decoder.read_u64("TradeEvent.virtual_sol_reserves")?;
-    decoder.read_u64("TradeEvent.virtual_token_reserves")?;
-    decoder.read_u64("TradeEvent.real_sol_reserves")?;
-    decoder.read_u64("TradeEvent.real_token_reserves")?;
-    decoder.read_pubkey("TradeEvent.fee_recipient")?;
-    decoder.read_u64("TradeEvent.fee_basis_points")?;
-    let fee = decoder.read_u64("TradeEvent.fee")?;
-    decoder.read_pubkey("TradeEvent.creator")?;
-    decoder.read_u64("TradeEvent.creator_fee_basis_points")?;
-    let creator_fee = decoder.read_u64("TradeEvent.creator_fee")?;
-    decoder.read_bool("TradeEvent.track_volume")?;
-    decoder.read_u64("TradeEvent.total_unclaimed_tokens")?;
-    decoder.read_u64("TradeEvent.total_claimed_tokens")?;
-    decoder.read_u64("TradeEvent.current_sol_volume")?;
-    decoder.read_i64("TradeEvent.last_update_timestamp")?;
-    decoder.read_string("TradeEvent.ix_name")?;
-    decoder.read_bool("TradeEvent.mayhem_mode")?;
-    decoder.read_u64("TradeEvent.cashback_fee_basis_points")?;
-    let cashback = decoder.read_u64("TradeEvent.cashback")?;
-    decoder.read_u64("TradeEvent.buyback_fee_basis_points")?;
-    // The buyback fee is a portion of `fee`, not an additional user charge.
-    decoder.read_u64("TradeEvent.buyback_fee")?;
-    let shareholder_count = decoder.read_u32("TradeEvent.shareholders.length")? as usize;
-    let shareholder_bytes = shareholder_count.checked_mul(34).ok_or_else(|| {
-        ParseError::InvalidInstructionData(
-            "TradeEvent shareholder collection length overflows".to_owned(),
-        )
-    })?;
-    decoder.read_bytes(shareholder_bytes, "TradeEvent.shareholders")?;
-    let quote_mint = decoder.read_pubkey("TradeEvent.quote_mint")?;
-    let quote_amount = decoder.read_u64("TradeEvent.quote_amount")?;
-    decoder.read_u64("TradeEvent.virtual_quote_reserves")?;
-    decoder.read_u64("TradeEvent.real_quote_reserves")?;
-    decoder.finish("TradeEvent")?;
+    let event: TradeEventPrefix = decode_event_prefix(payload, "TradeEvent")?;
 
-    let total_fees = fee
-        .checked_add(creator_fee)
-        .and_then(|amount| amount.checked_add(cashback))
+    let total_fees = event
+        .fee
+        .checked_add(event.creator_fee)
+        .and_then(|amount| amount.checked_add(event.cashback))
         .ok_or_else(|| {
             ParseError::InvalidInstructionData("TradeEvent fee total overflows u64".to_owned())
         })?;
-    let quote_mint = if quote_mint == Pubkey::default() {
+    let quote_mint = if event.quote_mint == Pubkey::default() {
         WRAPPED_SOL_MINT.to_owned()
     } else {
-        quote_mint.to_string()
+        event.quote_mint.to_string()
     };
     let program_id = Pubkey::try_from(PROGRAM_ID).map_err(|error| {
         ParseError::InvalidInstructionData(format!("invalid Pump.fun program address: {error}"))
     })?;
-    let (pool, _) = Pubkey::find_program_address(&[b"bonding-curve", mint.as_ref()], &program_id);
+    let (pool, _) =
+        Pubkey::find_program_address(&[b"bonding-curve", event.mint.as_ref()], &program_id);
 
-    let (input_mint, input_amount, output_mint, output_amount) = if is_buy {
-        let input_amount = quote_amount.checked_add(total_fees).ok_or_else(|| {
+    let (input_mint, input_amount, output_mint, output_amount) = if event.is_buy {
+        let input_amount = event.quote_amount.checked_add(total_fees).ok_or_else(|| {
             ParseError::InvalidInstructionData(
                 "TradeEvent gross input amount overflows u64".to_owned(),
             )
         })?;
-        (quote_mint, input_amount, mint.to_string(), token_amount)
+        (
+            quote_mint,
+            input_amount,
+            event.mint.to_string(),
+            event.token_amount,
+        )
     } else {
-        let output_amount = quote_amount.checked_sub(total_fees).ok_or_else(|| {
+        let output_amount = event.quote_amount.checked_sub(total_fees).ok_or_else(|| {
             ParseError::InvalidInstructionData(
                 "TradeEvent fees exceed the quote output amount".to_owned(),
             )
         })?;
-        (mint.to_string(), token_amount, quote_mint, output_amount)
+        (
+            event.mint.to_string(),
+            event.token_amount,
+            quote_mint,
+            output_amount,
+        )
     };
 
     Ok(TokenSwap {
-        user: user.to_string(),
+        user: event.user.to_string(),
         pool: pool.to_string(),
         base_mint: None,
         quote_mint: None,
@@ -190,83 +213,6 @@ fn parse_trade_event(payload: &[u8]) -> ParseResult<TokenSwap> {
         output_mint,
         output_amount,
     })
-}
-
-struct Decoder<'a> {
-    data: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> Decoder<'a> {
-    const fn new(data: &'a [u8]) -> Self {
-        Self { data, offset: 0 }
-    }
-
-    fn read_bytes(&mut self, length: usize, field: &str) -> ParseResult<&'a [u8]> {
-        let end = self.offset.checked_add(length).ok_or_else(|| {
-            ParseError::InvalidInstructionData(format!("{field} length overflows"))
-        })?;
-        let bytes = self
-            .data
-            .get(self.offset..end)
-            .ok_or(ParseError::DataTooShort {
-                expected_at_least: EVENT_HEADER_LEN.saturating_add(end),
-                actual: EVENT_HEADER_LEN.saturating_add(self.data.len()),
-            })?;
-        self.offset = end;
-        Ok(bytes)
-    }
-
-    fn read_array<const LENGTH: usize>(&mut self, field: &str) -> ParseResult<[u8; LENGTH]> {
-        self.read_bytes(LENGTH, field)?
-            .try_into()
-            .map_err(|_| ParseError::InvalidInstructionData(format!("invalid {field} length")))
-    }
-
-    fn read_u32(&mut self, field: &str) -> ParseResult<u32> {
-        Ok(u32::from_le_bytes(self.read_array(field)?))
-    }
-
-    fn read_u64(&mut self, field: &str) -> ParseResult<u64> {
-        Ok(u64::from_le_bytes(self.read_array(field)?))
-    }
-
-    fn read_i64(&mut self, field: &str) -> ParseResult<i64> {
-        Ok(i64::from_le_bytes(self.read_array(field)?))
-    }
-
-    fn read_bool(&mut self, field: &str) -> ParseResult<bool> {
-        match self.read_bytes(1, field)?[0] {
-            0 => Ok(false),
-            1 => Ok(true),
-            value => Err(ParseError::InvalidInstructionData(format!(
-                "{field} contains invalid bool value {value}"
-            ))),
-        }
-    }
-
-    fn read_pubkey(&mut self, field: &str) -> ParseResult<Pubkey> {
-        Ok(Pubkey::new_from_array(self.read_array(field)?))
-    }
-
-    fn read_string(&mut self, field: &str) -> ParseResult<String> {
-        let length = self.read_u32(&format!("{field}.length"))? as usize;
-        let bytes = self.read_bytes(length, field)?;
-        str::from_utf8(bytes).map(str::to_owned).map_err(|error| {
-            ParseError::InvalidInstructionData(format!("{field} is not valid UTF-8: {error}"))
-        })
-    }
-
-    fn finish(&self, event: &str) -> ParseResult<()> {
-        if self.offset == self.data.len() {
-            Ok(())
-        } else {
-            Err(ParseError::InvalidInstructionData(format!(
-                "{event} contains {} unexpected trailing bytes",
-                self.data.len() - self.offset
-            )))
-        }
-    }
 }
 
 #[cfg(test)]
@@ -310,6 +256,47 @@ mod tests {
                 symbol: "OILPEPE".to_owned(),
                 uri: "https://ipfs.io/ipfs/QmTJUYbmXG3AT28fxiSyTjrNiNHTkyc1ifeT4BNMZ1JUQm"
                     .to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_real_mainnet_events_with_holder_reward_fields() {
+        // Captured after the program appended `holder_rewards_bps` and
+        // `holder_rewards` to `TradeEvent`, and `creator_fee_bps` and
+        // `is_holder_reward` to `CreateEvent`.
+        let (fixture, _, event) = parse_fixture(include_str!(
+            "../tests/fixtures/trade_event_holder_rewards_mainnet.json"
+        ));
+
+        assert_eq!(fixture["slot"], 449_427_601);
+        assert_eq!(
+            event,
+            ParsedEvent::TokenSwap(TokenSwap {
+                user: "HcfrKfAvxFaGdVUhH5iGXRX63Ku6MoYHT4Kj9AqHVSRA".to_owned(),
+                pool: "G7V6o1RyWUn6PyXLdjHZ1MdTRzdGwQLXCjBnzvFLes6e".to_owned(),
+                base_mint: None,
+                quote_mint: None,
+                input_mint: "91CfqPw2hwzi7azaDmJ4fFtHa93yc8KAQV7ss6Xrpump".to_owned(),
+                input_amount: 335_031_172_403,
+                output_mint: WRAPPED_SOL_MINT.to_owned(),
+                output_amount: 9_753_083,
+            })
+        );
+
+        let (fixture, _, event) = parse_fixture(include_str!(
+            "../tests/fixtures/create_event_holder_rewards_mainnet.json"
+        ));
+
+        assert_eq!(fixture["slot"], 449_427_602);
+        assert_eq!(
+            event,
+            ParsedEvent::TokenDiscovery(TokenDiscovery {
+                mint: "DZyDVTXN4bfXT6xF8KUTfHZ669zJ3fAUVWysNibEHZfP".to_owned(),
+                creator: "6nU2L7MQVUWjtdKHVpuZA9aind73nd3rXC4YFo8KQCy4".to_owned(),
+                name: "OpenMuse".to_owned(),
+                symbol: "OPENMUSE".to_owned(),
+                uri: "https://pf.jake-98f.workers.dev/metadata/9zy230gh.json".to_owned(),
             })
         );
     }
@@ -392,14 +379,32 @@ mod tests {
     fn rejects_truncated_event_payloads() {
         let (_, mut data, _) =
             parse_fixture(include_str!("../tests/fixtures/create_event_mainnet.json"));
-        data.pop();
+        // Bytes past the modeled prefix are ignored on purpose, so the payload
+        // has to be cut inside it for the truncation to be detectable.
+        let prefix_len = modeled_prefix_len::<CreateEventPrefix>(&data);
+        data.truncate(EVENT_HEADER_LEN + prefix_len - 1);
         let accounts = [EVENT_AUTHORITY];
         let instruction = InstructionContext::new(PROGRAM_ID, &accounts, &data);
 
-        assert!(matches!(
+        assert_invalid(
             PumpFunParser.parse_instruction(instruction),
-            Err(ParseError::DataTooShort { .. })
-        ));
+            "Unexpected length of input",
+        );
+    }
+
+    /// Bytes consumed by the prefix this parser models for a real event payload.
+    fn modeled_prefix_len<T: BorshDeserialize>(data: &[u8]) -> usize {
+        let payload = &data[EVENT_HEADER_LEN..];
+        let mut remaining = payload;
+        T::deserialize(&mut remaining).expect("fixture must decode");
+        payload.len() - remaining.len()
+    }
+
+    fn assert_invalid(result: ParseResult<Option<ParsedEvent>>, expected: &str) {
+        assert!(
+            matches!(&result, Err(ParseError::InvalidInstructionData(reason)) if reason.contains(expected)),
+            "expected invalid instruction data containing {expected:?}, got {result:?}"
+        );
     }
 
     #[test]
@@ -412,28 +417,36 @@ mod tests {
         let accounts = [EVENT_AUTHORITY];
         let instruction = InstructionContext::new(PROGRAM_ID, &accounts, &data);
 
-        assert_eq!(
+        assert_invalid(
             PumpFunParser.parse_instruction(instruction),
-            Err(ParseError::InvalidInstructionData(
-                "TradeEvent.is_buy contains invalid bool value 2".to_owned()
-            ))
+            "Invalid bool representation",
         );
     }
 
     #[test]
-    fn rejects_unexpected_trailing_event_data() {
-        let (_, mut data, _) =
-            parse_fixture(include_str!("../tests/fixtures/create_event_mainnet.json"));
-        data.push(0);
-        let accounts = [EVENT_AUTHORITY];
-        let instruction = InstructionContext::new(PROGRAM_ID, &accounts, &data);
+    fn parses_events_carrying_fields_appended_by_protocol_upgrades() {
+        // The program appended `creator_fee_bps` and `is_holder_reward` to
+        // `CreateEvent` after this fixture was captured. Fields added past the
+        // modeled prefix must not stop the event from being parsed.
+        for fixture in [
+            include_str!("../tests/fixtures/create_event_mainnet.json"),
+            include_str!("../tests/fixtures/trade_event_buy_mainnet.json"),
+        ] {
+            let (_, data, _) = parse_fixture(fixture);
+            let accounts = [EVENT_AUTHORITY];
+            let expected = PumpFunParser
+                .parse_instruction(InstructionContext::new(PROGRAM_ID, &accounts, &data));
 
-        assert_eq!(
-            PumpFunParser.parse_instruction(instruction),
-            Err(ParseError::InvalidInstructionData(
-                "CreateEvent contains 1 unexpected trailing bytes".to_owned()
-            ))
-        );
+            let mut upgraded = data;
+            upgraded.extend_from_slice(&[0; 16]);
+
+            assert_eq!(
+                PumpFunParser
+                    .parse_instruction(InstructionContext::new(PROGRAM_ID, &accounts, &upgraded)),
+                expected
+            );
+            assert!(matches!(expected, Ok(Some(_))));
+        }
     }
 
     #[test]
@@ -447,10 +460,10 @@ mod tests {
         let accounts = [EVENT_AUTHORITY];
         let instruction = InstructionContext::new(PROGRAM_ID, &accounts, &data);
 
-        assert!(matches!(
+        assert_invalid(
             PumpFunParser.parse_instruction(instruction),
-            Err(ParseError::DataTooShort { .. })
-        ));
+            "Unexpected length of input",
+        );
     }
 
     #[test]

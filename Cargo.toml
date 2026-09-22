@@ -18,6 +18,7 @@ license = "MIT"
 repository = ""
 
 [workspace.dependencies]
+borsh = { version = "1.5.5", features = ["derive"] }
 bs58 = "0.5.1"
 clickhouse = { version = "0.15.1", default-features = false, features = ["lz4", "rustls-tls-ring", "rustls-tls-webpki-roots"] }
 common = { path = "common" }

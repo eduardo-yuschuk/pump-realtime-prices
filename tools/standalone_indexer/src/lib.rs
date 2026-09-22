@@ -1,12 +1,15 @@
 //! WebSocket adapter that parses finalized Solana blocks as they arrive.
 
 use std::{
+    cmp::Reverse,
+    collections::BTreeMap,
     env,
     error::Error,
     fmt, io,
     time::{Duration, Instant},
 };
 
+use common::ParsedEvent;
 use futures_util::{SinkExt, StreamExt};
 use parser::{BlockEvents, BlockParseError, BlockParser, ParserInitError};
 use saver::{Saver, SaverError};
@@ -14,6 +17,8 @@ use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(5);
+const MAX_REPORTED_PARSE_FAILURES: usize = 5;
+const UNKNOWN_PROGRAM_ID: &str = "unknown";
 
 #[derive(Debug)]
 pub enum IndexerError {
@@ -107,7 +112,9 @@ pub struct BlockSummary {
     pub parsed_transactions: usize,
     pub results: usize,
     pub events: usize,
+    pub token_swaps: usize,
     pub failures: usize,
+    pub saved_prices: usize,
     pub parse_duration: Duration,
     pub database_write_duration: Duration,
 }
@@ -116,15 +123,36 @@ impl fmt::Display for BlockSummary {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "Block slot={}: transactions={} parsed_transactions={} results={} events={} failures={} parse_time_ms={:.3} database_write_time_ms={:.3}",
+            "Block slot={}: transactions={} parsed_transactions={} results={} events={} token_swaps={} failures={} saved_prices={} parse_time_ms={:.3} database_write_time_ms={:.3}",
             self.slot,
             self.block_transactions,
             self.parsed_transactions,
             self.results,
             self.events,
+            self.token_swaps,
             self.failures,
+            self.saved_prices,
             self.parse_duration.as_secs_f64() * 1_000.0,
             self.database_write_duration.as_secs_f64() * 1_000.0
+        )
+    }
+}
+
+/// Parse failures of one block grouped by program and error message.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ParseFailureReport {
+    pub program_id: String,
+    pub reason: String,
+    pub count: usize,
+    pub example_signature: String,
+}
+
+impl fmt::Display for ParseFailureReport {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "Parse failure: count={} program={} example_signature={} reason={}",
+            self.count, self.program_id, self.example_signature, self.reason
         )
     }
 }
@@ -165,7 +193,7 @@ pub fn block_subscribe_request() -> Value {
                 "commitment": "finalized",
                 "encoding": "json",
                 "transactionDetails": "full",
-                "maxSupportedTransactionVersion": 0,
+                "maxSupportedTransactionVersion": 1,
                 "showRewards": false
             }
         ]
@@ -243,8 +271,14 @@ async fn receive_blocks(
                 }
                 match process_notification_events(&message, parser) {
                     Ok(Some((mut summary, events))) => {
+                        for report in parse_failure_reports(&events)
+                            .iter()
+                            .take(MAX_REPORTED_PARSE_FAILURES)
+                        {
+                            eprintln!("{report}");
+                        }
                         let save_started_at = Instant::now();
-                        saver
+                        summary.saved_prices = saver
                             .save_block_events(&events)
                             .await
                             .map_err(ProcessingError::Save)
@@ -306,22 +340,59 @@ fn extract_block_notification(
     Ok(Some(BlockNotification { slot, block }))
 }
 
+/// Groups the block parse failures so a repeated root cause is reported once.
+pub fn parse_failure_reports(events: &BlockEvents) -> Vec<ParseFailureReport> {
+    let mut grouped: BTreeMap<(&str, String), (usize, &str)> = BTreeMap::new();
+
+    for transaction in &events.transactions {
+        for instruction in &transaction.instructions {
+            let Err(failure) = &instruction.result else {
+                continue;
+            };
+            let program_id = failure.program_id.as_deref().unwrap_or(UNKNOWN_PROGRAM_ID);
+            let entry = grouped
+                .entry((program_id, failure.error.to_string()))
+                .or_insert((0, transaction.signature.as_str()));
+            entry.0 += 1;
+        }
+    }
+
+    let mut reports: Vec<_> = grouped
+        .into_iter()
+        .map(
+            |((program_id, reason), (count, example_signature))| ParseFailureReport {
+                program_id: program_id.to_owned(),
+                reason,
+                count,
+                example_signature: example_signature.to_owned(),
+            },
+        )
+        .collect();
+    reports.sort_by_key(|report| Reverse(report.count));
+    reports
+}
+
 fn summarize_block(
     slot: u64,
     block: &Value,
     events: &BlockEvents,
     parse_duration: Duration,
 ) -> BlockSummary {
-    let (results, event_count) = events
+    let (results, event_count, token_swaps) = events
         .transactions
         .iter()
         .flat_map(|transaction| &transaction.instructions)
-        .fold((0, 0), |(results, event_count), instruction| {
-            (
-                results + 1,
-                event_count + usize::from(instruction.result.is_ok()),
-            )
-        });
+        .fold(
+            (0, 0, 0),
+            |(results, event_count, token_swaps), instruction| {
+                (
+                    results + 1,
+                    event_count + usize::from(instruction.result.is_ok()),
+                    token_swaps
+                        + usize::from(matches!(instruction.result, Ok(ParsedEvent::TokenSwap(_)))),
+                )
+            },
+        );
 
     BlockSummary {
         slot,
@@ -332,7 +403,9 @@ fn summarize_block(
         parsed_transactions: events.transactions.len(),
         results,
         events: event_count,
+        token_swaps,
         failures: results - event_count,
+        saved_prices: 0,
         parse_duration,
         database_write_duration: Duration::ZERO,
     }
@@ -342,9 +415,43 @@ fn summarize_block(
 mod tests {
     use std::time::Duration;
 
-    use parser::{ParserConfig, ParserName};
+    use parser::{
+        InstructionEvents, InstructionParseError, InstructionParseFailure, ParserConfig,
+        ParserName, TransactionEvents,
+    };
 
     use super::*;
+
+    fn failed_instruction(
+        program_id: &str,
+        execution_ordinal: usize,
+        error: InstructionParseError,
+    ) -> InstructionEvents {
+        InstructionEvents {
+            program_id: Some(program_id.to_owned()),
+            outer_instruction_index: 0,
+            inner_instruction_index: None,
+            stack_height: Some(1),
+            execution_ordinal,
+            result: Err(InstructionParseFailure {
+                program_id: Some(program_id.to_owned()),
+                error,
+            }),
+        }
+    }
+
+    fn failed_transaction(
+        signature: &str,
+        transaction_index: usize,
+        instructions: Vec<InstructionEvents>,
+    ) -> TransactionEvents {
+        TransactionEvents {
+            signature: signature.to_owned(),
+            transaction_index,
+            token_decimals: BTreeMap::new(),
+            instructions,
+        }
+    }
 
     fn parser() -> BlockParser {
         BlockParser::from_config(ParserConfig::new(vec![ParserName::PumpFun]).unwrap()).unwrap()
@@ -364,7 +471,7 @@ mod tests {
                         "commitment": "finalized",
                         "encoding": "json",
                         "transactionDetails": "full",
-                        "maxSupportedTransactionVersion": 0,
+                        "maxSupportedTransactionVersion": 1,
                         "showRewards": false
                     }
                 ]
@@ -398,7 +505,9 @@ mod tests {
         assert_eq!(summary.parsed_transactions, 0);
         assert_eq!(summary.results, 0);
         assert_eq!(summary.events, 0);
+        assert_eq!(summary.token_swaps, 0);
         assert_eq!(summary.failures, 0);
+        assert_eq!(summary.saved_prices, 0);
         assert_eq!(summary.database_write_duration, Duration::ZERO);
     }
 
@@ -438,12 +547,78 @@ mod tests {
                 parsed_transactions: 2,
                 results: 3,
                 events: 2,
+                token_swaps: 1,
                 failures: 1,
+                saved_prices: 1,
                 parse_duration: Duration::from_micros(1_500),
                 database_write_duration: Duration::from_micros(2_500),
             }
             .to_string(),
-            "Block slot=42: transactions=12 parsed_transactions=2 results=3 events=2 failures=1 parse_time_ms=1.500 database_write_time_ms=2.500"
+            "Block slot=42: transactions=12 parsed_transactions=2 results=3 events=2 token_swaps=1 failures=1 saved_prices=1 parse_time_ms=1.500 database_write_time_ms=2.500"
+        );
+    }
+
+    #[test]
+    fn groups_parse_failures_by_program_and_reason() {
+        let invalid_field = InstructionParseError::InvalidField {
+            field: "accounts",
+            expected: "an array",
+        };
+        let events = BlockEvents {
+            transactions: vec![
+                failed_transaction(
+                    "first",
+                    0,
+                    vec![
+                        failed_instruction("pumpfun", 0, invalid_field.clone()),
+                        failed_instruction(
+                            "pumpswap",
+                            1,
+                            InstructionParseError::InvalidBase58Data("bad".to_owned()),
+                        ),
+                    ],
+                ),
+                failed_transaction(
+                    "second",
+                    1,
+                    vec![failed_instruction("pumpfun", 0, invalid_field)],
+                ),
+            ],
+        };
+
+        let reports = parse_failure_reports(&events);
+
+        assert_eq!(reports.len(), 2);
+        assert_eq!(
+            reports[0],
+            ParseFailureReport {
+                program_id: "pumpfun".to_owned(),
+                reason: "accounts must be an array".to_owned(),
+                count: 2,
+                example_signature: "first".to_owned(),
+            }
+        );
+        assert_eq!(reports[1].program_id, "pumpswap");
+        assert_eq!(reports[1].count, 1);
+        assert_eq!(reports[1].example_signature, "first");
+    }
+
+    #[test]
+    fn reports_no_parse_failures_for_successfully_parsed_blocks() {
+        assert!(parse_failure_reports(&BlockEvents::default()).is_empty());
+    }
+
+    #[test]
+    fn renders_parse_failure_reports() {
+        assert_eq!(
+            ParseFailureReport {
+                program_id: "pumpfun".to_owned(),
+                reason: "accounts must be an array".to_owned(),
+                count: 2,
+                example_signature: "first".to_owned(),
+            }
+            .to_string(),
+            "Parse failure: count=2 program=pumpfun example_signature=first reason=accounts must be an array"
         );
     }
 

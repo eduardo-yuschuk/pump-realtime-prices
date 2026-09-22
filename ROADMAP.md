@@ -43,6 +43,9 @@
 - [x] Batch PostgreSQL token pair price upserts per block while preserving the last swap for each liquidity provider.
 - [x] Include PostgreSQL batch write duration in standalone indexer block summaries.
 - [x] Batch all parsed swap prices and the latest price per liquidity provider into ClickHouse alongside PostgreSQL latest-price upserts, canonicalizing valid Pump.fun bonding-curve pairs as meme token/WSOL, filtering invalid pairs, and preserving PumpSwap parent base/quote mint order.
+- [x] Report parsed token swap counts, persisted price rows, and grouped instruction parse failures in standalone indexer block output to diagnose blocks that produce no database writes.
+- [x] Decode Pump.fun and PumpSwap events with Borsh prefix structs that model only the consumed fields, so protocol upgrades appending event fields no longer stop parsing, and validate both parsers against current mainnet payloads.
+- [x] Fetch transactions with `maxSupportedTransactionVersion: 1` so version 1 transactions can be stored as fixtures.
 
 ## Documentation
 

@@ -43,7 +43,7 @@ curl --fail-with-body --silent --show-error "$RPC_URL" \
       {
         \"commitment\": \"finalized\",
         \"encoding\": \"json\",
-        \"maxSupportedTransactionVersion\": 0
+        \"maxSupportedTransactionVersion\": 1
       }
     ]
   }" \

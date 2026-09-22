@@ -243,6 +243,9 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 [[package]]
 name = "common"
 version = "0.1.0"
+dependencies = [
+ "borsh",
+]
 
 [[package]]
 name = "const-oid"
@@ -1197,6 +1200,7 @@ dependencies = [
 name = "pumpfun"
 version = "0.1.0"
 dependencies = [
+ "borsh",
  "bs58",
  "common",
  "serde_json",
@@ -1207,6 +1211,7 @@ dependencies = [
 name = "pumpswap"
 version = "0.1.0"
 dependencies = [
+ "borsh",
  "bs58",
  "common",
  "serde_json",
@@ -1633,6 +1638,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 name = "standalone_indexer"
 version = "0.1.0"
 dependencies = [
+ "common",
  "dotenvy",
  "futures-util",
  "parser",

@@ -6,7 +6,8 @@ license.workspace = true
 
 [dependencies]
 common = { path = "../../../common" }
-solana-pubkey = { version = "4.3.0", features = ["curve25519"] }
+borsh.workspace = true
+solana-pubkey = { version = "4.3.0", features = ["curve25519", "borsh"] }
 
 [dev-dependencies]
 bs58 = "0.5.1"
